@@ -1,0 +1,9 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+gnuplotlib_pst_legacy.lua
+stl2palib2.lua
+particlelib_pst.lua
+*.html
+*.Rproj
