@@ -8,8 +8,9 @@ The main advantages compared the stl2pa command from SIMION SL Tools are:
    strategy issues of SL Tools).
 2. The electrode surface enhancement feature can be used (leads to higher 
    field accuracies).
-3. GEM files can be merged with STL geometries. (NOT IMPLEMENTED YET)
+3. Array mirroring can be used.
 4. Bounding boxes can easily be added.
+5. GEM files can be merged with STL geometries. (NOT IMPLEMENTED YET)
 
 Multi-electrode systems are handled as in SL Tools with the "%" character
 as a placeholder in the STL file name.
@@ -45,12 +46,19 @@ Example:
 	-- bounding box
 	local boundingbox = "-x+x-y+y-z+z"
 
+	-- array symmetry and mirroring
+	local symmetry = "3dplanar[yz]"
+
 	-- run stl2pa conversion
-	STL2PA.convert(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm, dy_mm, dz_mm, surface, boundingbox)
+	STL2PA.convert(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm, dy_mm, dz_mm, surface, boundingbox, symmetry)
+
+	-- -- modify or add one electrode in my_geometry.pa#
+	-- local electrode_no = 2  -- my_geometry-2.stl
+	-- STL2PA.modify(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, electrode_no, surface, boundingbox)
 
 
 Patrick Sturm
-(c) 2020 TOFWERK
+(c) 2021 TOFWERK
 --]]
 
 local STL2PA = {}
@@ -359,6 +367,17 @@ local function getSTLfiles(stl_filename)
 end
 
 
+-- write header
+local function writeHeader()
+	io.write("*********************************************\n")
+	io.write("STL2PA CONVERSION\n")
+	io.write("Copyright (c) 2021 TOFWERK\n")
+	io.write("Author: Patrick Sturm\n")
+	io.write("*********************************************\n\n")
+	io.flush()
+end
+
+
 -- STL to PA conversion -------------------------------------------------------
 function STL2PA.convert(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm, dy_mm, dz_mm, surface, boundingbox, symmetry)
 	local surfenhance = surface or "none"  -- surface enhancement
@@ -367,11 +386,7 @@ function STL2PA.convert(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm,
 	local path,name = splitPath(stl_filename)
 	local start_time, end_time1, end_time2 = 0, 0, 0
 
-	io.write("************************\n")
-	io.write("* STL to PA conversion *\n")
-	io.write("************************\n")
-	io.write("Patrick Sturm, (c) 2020 TOFWERK\n\n")
-	io.flush()
+	writeHeader()
 
 	simion.pas:close()  -- remove all PAs from RAM.
 	local pa = simion.pas:open()
@@ -497,6 +512,124 @@ function STL2PA.convert(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm,
 		for xi=0,(xmax-xmin)/dx_mm do
 			for yi=0,(ymax-ymin)/dy_mm do
 				pa:point(xi,yi,zimax, 0,true)
+			end
+		end
+	end
+
+	pa:save(path..string.gsub(name, "%-%%", "")..".pa#")
+	simion.pas:close()  -- remove all PAs from RAM.
+end
+
+
+-- modify (or add) one electrode of an existing PA# array ---------------------
+function STL2PA.modify(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, electrode_no, surface, boundingbox)
+	local surfenhance = surface or "none"  -- surface enhancement
+	local bounding = boundingbox or ""  -- grounded bounding box
+	local tol = 1e-5  -- move grid by tol mm to test if point is inside STL
+	local path,name = splitPath(stl_filename)
+
+	writeHeader()
+
+	simion.pas:close()  -- remove all PAs from RAM.
+	local pa = simion.pas:open(path..string.gsub(name, "%-%%", "")..".pa#")  -- open pa# file
+
+	-- read new STL file
+	local files = getSTLfiles(stl_filename)
+	local t_faces = {}
+	for i,v in ipairs(files) do
+		local potential = tonumber(string.match(v, "^.+%-(%d+)"))
+		if (potential==electrode_no) then
+			t_faces = STL2PA.readSTL(path..v)
+			break
+		end
+	end
+	if next(t_faces)==nil then 
+		print("Error: no STL file with electrode_no "..electrode_no.." found.")
+		return
+	end
+	local t_size = STL2PA.stlSize(t_faces)
+
+	-- delete electrode
+	for xi,yi,zi in pa:points() do
+		if pa:potential(xi,yi,zi) == electrode_no then
+			pa:point(xi,yi,zi, 0, false)
+		end
+	end
+
+	local dx_mm = pa.dx_mm
+	local dy_mm = pa.dy_mm
+	io.write("Generating STL hash table for "..path..string.gsub(name, "%-%%", "-"..electrode_no)..".stl".."\n")
+	io.flush()
+	local t_hash = map2Grid(t_faces, t_size, dx_mm, dy_mm)
+	io.write("Building PA...\n")
+	io.flush()
+	local xminstl = math.floor(t_size[1]/dx_mm)*dx_mm
+	local xmaxstl = math.floor(t_size[2]/dx_mm)*dx_mm
+	local yminstl = math.floor(t_size[3]/dy_mm)*dy_mm
+	local ymaxstl = math.floor(t_size[4]/dy_mm)*dy_mm
+	local zminstl = t_size[5]
+	local zmaxstl = t_size[6]
+	pa:fill { 
+		function(x,y,z)  -- in grid units
+			-- test if point is inside STL with different small offsets to catch edge cases
+			-- offset in +x+y, -x-y, -x+y and +x-y direction
+			if isInsideSTL(x+xmin+tol,y+ymin+tol,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or 
+				isInsideSTL(x+xmin-tol,y+ymin-tol,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or
+				isInsideSTL(x+xmin-tol,y+ymin+tol,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or 
+				isInsideSTL(x+xmin+tol,y+ymin-tol,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) then
+				return electrode_no, true
+			else
+				return 0, false
+			end
+		end, 
+		surface=surfenhance
+	}
+	io.write("\n")
+
+	if (electrode_no==0) then
+		if (string.match(bounding, "%-x")) then
+			for yi=0,(ymax-ymin)/dy_mm do
+				for zi=0,(zmax-zmin)/dz_mm do
+					pa:point(0,yi,zi, 0,true)
+				end
+			end
+		end
+		if (string.match(bounding, "%+x")) then
+			local ximax = (xmax-xmin)/dx_mm
+			for yi=0,(ymax-ymin)/dy_mm do
+				for zi=0,(zmax-zmin)/dz_mm do
+					pa:point(ximax,yi,zi, 0,true)
+				end
+			end
+		end
+		if (string.match(bounding, "%-y")) then
+			for xi=0,(xmax-xmin)/dx_mm do
+				for zi=0,(zmax-zmin)/dz_mm do
+					pa:point(xi,0,zi, 0,true)
+				end
+			end
+		end
+		if (string.match(bounding, "%+y")) then
+			local yimax = (ymax-ymin)/dy_mm
+			for xi=0,(xmax-xmin)/dx_mm do
+				for zi=0,(zmax-zmin)/dz_mm do
+					pa:point(xi,yimax,zi, 0,true)
+				end
+			end
+		end
+		if (string.match(bounding, "%-z")) then
+			for xi=0,(xmax-xmin)/dx_mm do
+				for yi=0,(ymax-ymin)/dy_mm do
+					pa:point(xi,yi,0, 0,true)
+				end
+			end
+		end
+		if (string.match(bounding, "%+z")) then
+			local zimax = (zmax-zmin)/dz_mm
+			for xi=0,(xmax-xmin)/dx_mm do
+				for yi=0,(ymax-ymin)/dy_mm do
+					pa:point(xi,yi,zimax, 0,true)
+				end
 			end
 		end
 	end
