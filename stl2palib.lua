@@ -3,7 +3,7 @@ stl2palib.lua
 
 Library to convert an electrode geometry from STL files to a SIMION potential array file.
 
-The main advantages compared the stl2pa command from SIMION SL Tools are:
+The main advantages compared to the stl2pa command from SIMION SL Tools are:
 1. The STL surface is filled with solid points (avoids the solid points 
    strategy issues of SL Tools).
 2. The electrode surface enhancement feature can be used (leads to higher 
@@ -367,7 +367,7 @@ local function getSTLfiles(stl_filename)
 end
 
 
--- write header
+-- write header ---------------------------------------------------------------
 local function writeHeader()
 	io.write("*********************************************\n")
 	io.write("STL2PA CONVERSION\n")
@@ -377,6 +377,55 @@ local function writeHeader()
 	io.flush()
 end
 
+
+-- add bounding box -----------------------------------------------------------
+local function addBoundingBox(bounding, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm, dy_mm, dz_mm)
+	if (string.match(bounding, "%-x")) then
+		for yi=0,(ymax-ymin)/dy_mm do
+			for zi=0,(zmax-zmin)/dz_mm do
+				pa:point(0,yi,zi, 0,true)
+			end
+		end
+	end
+	if (string.match(bounding, "%+x")) then
+		local ximax = (xmax-xmin)/dx_mm
+		for yi=0,(ymax-ymin)/dy_mm do
+			for zi=0,(zmax-zmin)/dz_mm do
+				pa:point(ximax,yi,zi, 0,true)
+			end
+		end
+	end
+	if (string.match(bounding, "%-y")) then
+		for xi=0,(xmax-xmin)/dx_mm do
+			for zi=0,(zmax-zmin)/dz_mm do
+				pa:point(xi,0,zi, 0,true)
+			end
+		end
+	end
+	if (string.match(bounding, "%+y")) then
+		local yimax = (ymax-ymin)/dy_mm
+		for xi=0,(xmax-xmin)/dx_mm do
+			for zi=0,(zmax-zmin)/dz_mm do
+				pa:point(xi,yimax,zi, 0,true)
+			end
+		end
+	end
+	if (string.match(bounding, "%-z")) then
+		for xi=0,(xmax-xmin)/dx_mm do
+			for yi=0,(ymax-ymin)/dy_mm do
+				pa:point(xi,yi,0, 0,true)
+			end
+		end
+	end
+	if (string.match(bounding, "%+z")) then
+		local zimax = (zmax-zmin)/dz_mm
+		for xi=0,(xmax-xmin)/dx_mm do
+			for yi=0,(ymax-ymin)/dy_mm do
+				pa:point(xi,yi,zimax, 0,true)
+			end
+		end
+	end
+end
 
 -- STL to PA conversion -------------------------------------------------------
 function STL2PA.convert(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm, dy_mm, dz_mm, surface, boundingbox, symmetry)
@@ -389,7 +438,7 @@ function STL2PA.convert(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm,
 	writeHeader()
 
 	simion.pas:close()  -- remove all PAs from RAM.
-	local pa = simion.pas:open()
+	pa = simion.pas:open()
 	pa:size((xmax-xmin)/dx_mm+1, (ymax-ymin)/dy_mm+1, (zmax-zmin)/dz_mm+1)
 	pa.dx_mm = dx_mm
 	pa.dy_mm = dy_mm
@@ -470,51 +519,7 @@ function STL2PA.convert(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm,
 		io.write("\n")
 	end
 
-	if (string.match(bounding, "%-x")) then
-		for yi=0,(ymax-ymin)/dy_mm do
-			for zi=0,(zmax-zmin)/dz_mm do
-				pa:point(0,yi,zi, 0,true)
-			end
-		end
-	end
-	if (string.match(bounding, "%+x")) then
-		local ximax = (xmax-xmin)/dx_mm
-		for yi=0,(ymax-ymin)/dy_mm do
-			for zi=0,(zmax-zmin)/dz_mm do
-				pa:point(ximax,yi,zi, 0,true)
-			end
-		end
-	end
-	if (string.match(bounding, "%-y")) then
-		for xi=0,(xmax-xmin)/dx_mm do
-			for zi=0,(zmax-zmin)/dz_mm do
-				pa:point(xi,0,zi, 0,true)
-			end
-		end
-	end
-	if (string.match(bounding, "%+y")) then
-		local yimax = (ymax-ymin)/dy_mm
-		for xi=0,(xmax-xmin)/dx_mm do
-			for zi=0,(zmax-zmin)/dz_mm do
-				pa:point(xi,yimax,zi, 0,true)
-			end
-		end
-	end
-	if (string.match(bounding, "%-z")) then
-		for xi=0,(xmax-xmin)/dx_mm do
-			for yi=0,(ymax-ymin)/dy_mm do
-				pa:point(xi,yi,0, 0,true)
-			end
-		end
-	end
-	if (string.match(bounding, "%+z")) then
-		local zimax = (zmax-zmin)/dz_mm
-		for xi=0,(xmax-xmin)/dx_mm do
-			for yi=0,(ymax-ymin)/dy_mm do
-				pa:point(xi,yi,zimax, 0,true)
-			end
-		end
-	end
+	addBoundingBox(bounding, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm, dy_mm, dz_mm)
 
 	pa:save(path..string.gsub(name, "%-%%", "")..".pa#")
 	simion.pas:close()  -- remove all PAs from RAM.
@@ -531,7 +536,7 @@ function STL2PA.modify(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, electro
 	writeHeader()
 
 	simion.pas:close()  -- remove all PAs from RAM.
-	local pa = simion.pas:open(path..string.gsub(name, "%-%%", "")..".pa#")  -- open pa# file
+	pa = simion.pas:open(path..string.gsub(name, "%-%%", "")..".pa#")  -- open pa# file
 
 	-- read new STL file
 	local files = getSTLfiles(stl_filename)
@@ -578,8 +583,6 @@ function STL2PA.modify(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, electro
 				isInsideSTL(x+xmin-tol,y+ymin+tol,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or 
 				isInsideSTL(x+xmin+tol,y+ymin-tol,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) then
 				return electrode_no, true
-			else
-				return 0, false
 			end
 		end, 
 		surface=surfenhance
@@ -587,51 +590,7 @@ function STL2PA.modify(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, electro
 	io.write("\n")
 
 	if (electrode_no==0) then
-		if (string.match(bounding, "%-x")) then
-			for yi=0,(ymax-ymin)/dy_mm do
-				for zi=0,(zmax-zmin)/dz_mm do
-					pa:point(0,yi,zi, 0,true)
-				end
-			end
-		end
-		if (string.match(bounding, "%+x")) then
-			local ximax = (xmax-xmin)/dx_mm
-			for yi=0,(ymax-ymin)/dy_mm do
-				for zi=0,(zmax-zmin)/dz_mm do
-					pa:point(ximax,yi,zi, 0,true)
-				end
-			end
-		end
-		if (string.match(bounding, "%-y")) then
-			for xi=0,(xmax-xmin)/dx_mm do
-				for zi=0,(zmax-zmin)/dz_mm do
-					pa:point(xi,0,zi, 0,true)
-				end
-			end
-		end
-		if (string.match(bounding, "%+y")) then
-			local yimax = (ymax-ymin)/dy_mm
-			for xi=0,(xmax-xmin)/dx_mm do
-				for zi=0,(zmax-zmin)/dz_mm do
-					pa:point(xi,yimax,zi, 0,true)
-				end
-			end
-		end
-		if (string.match(bounding, "%-z")) then
-			for xi=0,(xmax-xmin)/dx_mm do
-				for yi=0,(ymax-ymin)/dy_mm do
-					pa:point(xi,yi,0, 0,true)
-				end
-			end
-		end
-		if (string.match(bounding, "%+z")) then
-			local zimax = (zmax-zmin)/dz_mm
-			for xi=0,(xmax-xmin)/dx_mm do
-				for yi=0,(ymax-ymin)/dy_mm do
-					pa:point(xi,yi,zimax, 0,true)
-				end
-			end
-		end
+		addBoundingBox(bounding, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm, dy_mm, dz_mm)
 	end
 
 	pa:save(path..string.gsub(name, "%-%%", "")..".pa#")
