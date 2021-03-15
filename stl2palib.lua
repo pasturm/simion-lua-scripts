@@ -300,26 +300,26 @@ local function isInsideSTL(x,y,z, t_faces, xmin, xmax, ymin, ymax, zmin, zmax, t
 		local w0_3 = z-v0_3
 		local a = -(n1*w0_1+n2*w0_2+n3*w0_3)
 		local r = a/n3
-		r = math.floor(r*1e6+0.5)/1e6
+		-- r = math.floor(r*1e6+0.5)/1e6
 		if (r>=0) then  -- ray goes towards triangle
 			-- intersect point of ray and plane
 			local I1 = x
 			local I2 = y
 			local I3 = z+r
 		 	local uu = (u1*u1 + u2*u2 + u3*u3)
-		    local uv = (u1*v1 + u2*v2 + u3*v3)
-		    local vv = (v1*v1 + v2*v2 + v3*v3)
-		    local w1 = I1-v0_1
-		    local w2 = I2-v0_2
-		    local w3 = I3-v0_3
-		    local wu = (w1*u1 + w2*u2 + w3*u3)
-		    local wv = (w1*v1 + w2*v2 + w3*v3)
-		    local D = uv*uv - uu*vv
-		    local s = (uv*wv - vv*wu)/D
-		    local t = (uv*wu - uu*wv)/D
-		    s = math.floor(s*1e6+0.5)/1e6
-		    t = math.floor(t*1e6+0.5)/1e6
-		    -- I is inside or on edge or on corner of T  
+	    local uv = (u1*v1 + u2*v2 + u3*v3)
+	    local vv = (v1*v1 + v2*v2 + v3*v3)
+	    local w1 = I1-v0_1
+	    local w2 = I2-v0_2
+	    local w3 = I3-v0_3
+	    local wu = (w1*u1 + w2*u2 + w3*u3)
+	    local wv = (w1*v1 + w2*v2 + w3*v3)
+	    local D = uv*uv - uu*vv
+	    local s = (uv*wv - vv*wu)/D
+	    local t = (uv*wu - uu*wv)/D
+	    -- s = math.floor(s*1e7+0.5)/1e7
+	    -- t = math.floor(t*1e7+0.5)/1e7
+	    -- I is inside or on edge or on corner of T  
 			if (s>=0 and s<=1 and t>=0 and (s+t)<=1) then
 				if (r==0) then
 					return true
@@ -432,6 +432,7 @@ function STL2PA.convert(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm,
 	local surfenhance = surface or "none"  -- surface enhancement
 	local bounding = boundingbox or ""  -- grounded bounding box
 	local tol = 1e-5  -- move grid by tol mm to test if point is inside STL
+	local tol2 = tol*1.01  -- move grid by tol mm to test if point is inside STL
 	local path,name = splitPath(stl_filename)
 	local start_time, end_time1, end_time2 = 0, 0, 0
 
@@ -462,19 +463,19 @@ function STL2PA.convert(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm,
 			io.write(i.."/"..#files.." Building PA... ")
 			io.flush()
 			local xminstl = math.floor(t_size[1]/dx_mm)*dx_mm
-			local xmaxstl = math.floor(t_size[2]/dx_mm)*dx_mm
+			local xmaxstl = math.ceil(t_size[2]/dx_mm)*dx_mm
 			local yminstl = math.floor(t_size[3]/dy_mm)*dy_mm
-			local ymaxstl = math.floor(t_size[4]/dy_mm)*dy_mm
+			local ymaxstl = math.ceil(t_size[4]/dy_mm)*dy_mm
 			local zminstl = t_size[5]
 			local zmaxstl = t_size[6]
 			pa:fill { 
 				function(x,y,z)  -- in grid units
 					-- test if point is inside STL with different small offsets to catch edge cases
 					-- offset in +x+y, -x-y, -x+y and +x-y direction
-					if isInsideSTL(x+xmin+tol,y+ymin+tol,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or 
-						isInsideSTL(x+xmin-tol,y+ymin-tol,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or
-						isInsideSTL(x+xmin-tol,y+ymin+tol,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or 
-						isInsideSTL(x+xmin+tol,y+ymin-tol,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) then
+					if isInsideSTL(x+xmin+tol,y+ymin+tol2,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or 
+						isInsideSTL(x+xmin-tol,y+ymin-tol2,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or
+						isInsideSTL(x+xmin-tol,y+ymin+tol2,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or 
+						isInsideSTL(x+xmin+tol,y+ymin-tol2,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) then
 						return potential, true
 					else
 						if i==1 then  -- do not overwrite other electrodes
@@ -496,19 +497,19 @@ function STL2PA.convert(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm,
 		io.write("Building PA...\n")
 		io.flush()
 		local xminstl = math.floor(t_size[1]/dx_mm)*dx_mm
-		local xmaxstl = math.floor(t_size[2]/dx_mm)*dx_mm
+		local xmaxstl = math.ceil(t_size[2]/dx_mm)*dx_mm
 		local yminstl = math.floor(t_size[3]/dy_mm)*dy_mm
-		local ymaxstl = math.floor(t_size[4]/dy_mm)*dy_mm
+		local ymaxstl = math.ceil(t_size[4]/dy_mm)*dy_mm
 		local zminstl = t_size[5]
 		local zmaxstl = t_size[6]
 		pa:fill { 
-			function(x,y,z)  -- in grid units
+			function(x,y,z)
 				-- test if point is inside STL with different small offsets to catch edge cases
 				-- offset in +x+y, -x-y, -x+y and +x-y direction
-				if isInsideSTL(x+xmin+tol,y+ymin+tol,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or 
-					isInsideSTL(x+xmin-tol,y+ymin-tol,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or
-					isInsideSTL(x+xmin-tol,y+ymin+tol,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or 
-					isInsideSTL(x+xmin+tol,y+ymin-tol,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) then
+				if isInsideSTL(x+xmin+tol,y+ymin+tol2,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or 
+					isInsideSTL(x+xmin-tol,y+ymin-tol2,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or
+					isInsideSTL(x+xmin-tol,y+ymin+tol2,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or 
+					isInsideSTL(x+xmin+tol,y+ymin-tol2,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) then
 					return 1, true
 				else
 					return 0, false
@@ -531,6 +532,7 @@ function STL2PA.modify(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, electro
 	local surfenhance = surface or "none"  -- surface enhancement
 	local bounding = boundingbox or ""  -- grounded bounding box
 	local tol = 1e-5  -- move grid by tol mm to test if point is inside STL
+	local tol2 = tol*1.01  -- move grid by tol mm to test if point is inside STL
 	local path,name = splitPath(stl_filename)
 
 	writeHeader()
@@ -569,19 +571,19 @@ function STL2PA.modify(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, electro
 	io.write("Building PA...\n")
 	io.flush()
 	local xminstl = math.floor(t_size[1]/dx_mm)*dx_mm
-	local xmaxstl = math.floor(t_size[2]/dx_mm)*dx_mm
+	local xmaxstl = math.ceil(t_size[2]/dx_mm)*dx_mm
 	local yminstl = math.floor(t_size[3]/dy_mm)*dy_mm
-	local ymaxstl = math.floor(t_size[4]/dy_mm)*dy_mm
+	local ymaxstl = math.ceil(t_size[4]/dy_mm)*dy_mm
 	local zminstl = t_size[5]
 	local zmaxstl = t_size[6]
 	pa:fill { 
-		function(x,y,z)  -- in grid units
+		function(x,y,z)
 			-- test if point is inside STL with different small offsets to catch edge cases
 			-- offset in +x+y, -x-y, -x+y and +x-y direction
-			if isInsideSTL(x+xmin+tol,y+ymin+tol,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or 
-				isInsideSTL(x+xmin-tol,y+ymin-tol,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or
-				isInsideSTL(x+xmin-tol,y+ymin+tol,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or 
-				isInsideSTL(x+xmin+tol,y+ymin-tol,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) then
+			if isInsideSTL(x+xmin+tol,y+ymin+tol2,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or 
+				isInsideSTL(x+xmin-tol,y+ymin-tol2,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or
+				isInsideSTL(x+xmin-tol,y+ymin+tol2,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or 
+				isInsideSTL(x+xmin+tol,y+ymin-tol2,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) then
 				return electrode_no, true
 			end
 		end, 
