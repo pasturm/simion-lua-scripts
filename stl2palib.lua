@@ -307,19 +307,19 @@ local function isInsideSTL(x,y,z, t_faces, xmin, xmax, ymin, ymax, zmin, zmax, t
 			local I2 = y
 			local I3 = z+r
 		 	local uu = (u1*u1 + u2*u2 + u3*u3)
-	    local uv = (u1*v1 + u2*v2 + u3*v3)
-	    local vv = (v1*v1 + v2*v2 + v3*v3)
-	    local w1 = I1-v0_1
-	    local w2 = I2-v0_2
-	    local w3 = I3-v0_3
-	    local wu = (w1*u1 + w2*u2 + w3*u3)
-	    local wv = (w1*v1 + w2*v2 + w3*v3)
-	    local D = uv*uv - uu*vv
-	    local s = (uv*wv - vv*wu)/D
-	    local t = (uv*wu - uu*wv)/D
-	    -- s = math.floor(s*1e7+0.5)/1e7
-	    -- t = math.floor(t*1e7+0.5)/1e7
-	    -- I is inside or on edge or on corner of T  
+			local uv = (u1*v1 + u2*v2 + u3*v3)
+			local vv = (v1*v1 + v2*v2 + v3*v3)
+			local w1 = I1-v0_1
+			local w2 = I2-v0_2
+			local w3 = I3-v0_3
+			local wu = (w1*u1 + w2*u2 + w3*u3)
+			local wv = (w1*v1 + w2*v2 + w3*v3)
+			local D = uv*uv - uu*vv
+			local s = (uv*wv - vv*wu)/D
+			local t = (uv*wu - uu*wv)/D
+			-- s = math.floor(s*1e7+0.5)/1e7
+			-- t = math.floor(t*1e7+0.5)/1e7
+			-- I is inside or on edge or on corner of T  
 			if (s>=0 and s<=1 and t>=0 and (s+t)<=1) then
 				if (r==0) then
 					return true
@@ -596,6 +596,110 @@ function STL2PA.modify(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, electro
 	end
 
 	pa:save(path..string.gsub(name, "%-%%", "")..".pa#")
+	simion.pas:close()  -- remove all PAs from RAM.
+end
+
+
+-- add or modifiy bounding box in .pa# file -----------------------------------------------------------
+function STL2PA.boundingBox(stl_filename, bounding, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm, dy_mm, dz_mm)
+	local path,name = splitPath(stl_filename)
+	local file = path..string.gsub(name, "%-%%", "")..".pa#"
+
+	writeHeader()
+	io.write("Adding bounding box "..bounding.."\n")
+	io.flush()
+
+	simion.pas:close()  -- remove all PAs from RAM.
+	pa = simion.pas:open(file)  -- open pa# file
+
+	if (string.match(bounding, "%-x")) then
+		for yi=0,(ymax-ymin)/dy_mm do
+			for zi=0,(zmax-zmin)/dz_mm do
+				pa:point(0,yi,zi, 0,true)
+			end
+		end
+	else
+		for yi=0,(ymax-ymin)/dy_mm do
+			for zi=0,(zmax-zmin)/dz_mm do
+				pa:point(0,yi,zi, 0,false)
+			end
+		end
+	end
+
+	local ximax = (xmax-xmin)/dx_mm
+	if (string.match(bounding, "%+x")) then
+		for yi=0,(ymax-ymin)/dy_mm do
+			for zi=0,(zmax-zmin)/dz_mm do
+				pa:point(ximax,yi,zi, 0,true)
+			end
+		end
+	else
+		for yi=0,(ymax-ymin)/dy_mm do
+			for zi=0,(zmax-zmin)/dz_mm do
+				pa:point(ximax,yi,zi, 0,false)
+			end
+		end
+	end
+
+	if (string.match(bounding, "%-y")) then
+		for xi=0,(xmax-xmin)/dx_mm do
+			for zi=0,(zmax-zmin)/dz_mm do
+				pa:point(xi,0,zi, 0,true)
+			end
+		end
+	else
+		for xi=0,(xmax-xmin)/dx_mm do
+			for zi=0,(zmax-zmin)/dz_mm do
+				pa:point(xi,0,zi, 0,false)
+			end
+		end
+	end
+
+	local yimax = (ymax-ymin)/dy_mm
+	if (string.match(bounding, "%+y")) then
+		for xi=0,(xmax-xmin)/dx_mm do
+			for zi=0,(zmax-zmin)/dz_mm do
+				pa:point(xi,yimax,zi, 0,true)
+			end
+		end
+	else
+		for xi=0,(xmax-xmin)/dx_mm do
+			for zi=0,(zmax-zmin)/dz_mm do
+				pa:point(xi,yimax,zi, 0,false)
+			end
+		end
+	end
+
+	if (string.match(bounding, "%-z")) then
+		for xi=0,(xmax-xmin)/dx_mm do
+			for yi=0,(ymax-ymin)/dy_mm do
+				pa:point(xi,yi,0, 0,true)
+			end
+		end
+	else
+		for xi=0,(xmax-xmin)/dx_mm do
+			for yi=0,(ymax-ymin)/dy_mm do
+				pa:point(xi,yi,0, 0,false)
+			end
+		end
+	end
+
+	local zimax = (zmax-zmin)/dz_mm
+	if (string.match(bounding, "%+z")) then
+		for xi=0,(xmax-xmin)/dx_mm do
+			for yi=0,(ymax-ymin)/dy_mm do
+				pa:point(xi,yi,zimax, 0,true)
+			end
+		end
+	else
+		for xi=0,(xmax-xmin)/dx_mm do
+			for yi=0,(ymax-ymin)/dy_mm do
+				pa:point(xi,yi,zimax, 0,false)
+			end
+		end
+	end
+
+	pa:save(file)
 	simion.pas:close()  -- remove all PAs from RAM.
 end
 
