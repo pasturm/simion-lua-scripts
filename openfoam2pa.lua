@@ -1,5 +1,5 @@
 --[[
-openfoam_to_pa.lua
+openfoam2pa.lua
 Converts OpenFOAM data file to SIMION PA files.
 
 OpenFOAM is an open source software for computational fluid dynamics (CFD) 
@@ -7,30 +7,31 @@ https://openfoam.org/
 
 This will create one SIMION PA for each scalar component.
 
+In ParaView apply a PointVolumeInterpolator filter with the box size 
+the same as the PA size and the resolution and cell size as desired.
+Then save the data as csv file (Choose T, U and p arrays and select
+Point Data).
+
 Some adjustment to this program may be necessary for your own purposes.
 
-ParaView/ParaFoam pre-processing:
-  * PointVolumeInterpolator
-  * Adjust the resolution (number of cells) to the desired value
-  * Save Data... (CSV File, default settings)
-
-Patrick Sturm, v2018-01-23
-(c) 2018-2020 TOFWERK
+Patrick Sturm
+(c) 2018-2021 TOFWERK
 --]]
 
+local filename = "C:/Users/pst/OpenFOAM/data.csv"
 
 -- grid size (same as in CSV input file)
-local nx = 76
-local ny = 14
-local nz = 14
+local nx = 52
+local ny = 52
+local nz = 104
 
--- domain size, in mm (see blockMeshDict)
-local xmin = -3
-local xmax = 35
-local ymin = 0
-local ymax = 7
-local zmin = 0
-local zmax = 7
+-- domain size, in mm (same as in CSV input file)
+local xmin = -13
+local xmax = 13
+local ymin = -13
+local ymax = 13
+local zmin = -12
+local zmax = 40
 
 local dx = (xmax - xmin) / nx
 local dy = (ymax - ymin) / ny
@@ -114,4 +115,4 @@ local function convert_file(filename, pa_filename_prefix)
 end
 
 -- Convert files.
-convert_file('data0.csv', 'openfoam')
+convert_file(filename, 'openfoam')

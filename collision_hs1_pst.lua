@@ -1,53 +1,51 @@
---[[
-collision_hs1.lua
-A hard-sphere, elastic, ion-neutral collision model for SIMION 8.
-REVISION-6-2009-10-02
-
-The code implements a rather complete hard-sphere collision model.
-Collision models are useful for simulating non-vacuum conditions, in
-which case ions collide against a background gas and are deflected
-randomly.
-
-Features and assumptions of the model:
-- Ion collisions follow the hard-sphere collision model.
-    Energy transfers occur solely via these collisions.
-- Ion collisions are elastic.
-- Background gas is assumed neutral in charge.
-- Background gas velocity follows the Maxwell-Boltzmann distribution.
-- Background gas mean velocity may be non-zero.
-- Kinetic cooling and heating of ions due to collisions
--   are simulated.
-- Kinetic cooling and heating of background gas is assumed
-    negligible over many collisions.
-
-Note on time-steps: each individual ion-gas collision is modeled,
-which requires the time-step to be some fraction of mean-free-path.
-Therefore, simulations with frequent collisions (i.e. higher
-pressure) can be computationally intensive.
-
-This code does not account for absorptions (e.g. when using electrons
-rather than ions).  That can be easily supported by setting ion_splat,
-likely as a function of impact_offset.
-
-The code has been influenced by a variety of prior SIMION hard-sphere
-collision models:
-  [Dahl] _Trap/INJECT.PRG in SIMION 7.0
-  [Dahl2] http://www.simion.com/examples/dahl_drag.prg
-  [Appelhans2001] http://dx.doi.org/10.1016/S1387-3806(02)00627-9
-  [Ding2002] http://dx.doi.org/10.1016/S1387-3806(02)00921-1
-  [Ling1997]
-  http://dx.doi.org/10.1002/(SICI)1097-0231(19970830)11:13<1467::AID-RCM54>3.0.CO;2-X
-See also ( http://www.simion.com/info/Ion-Gas_Collisions ).
-
-Additional mathematic derivations are in notes.pdf.
-
-Author David Manura, 2005-06/2011
-(c) 2006-2011 Scientific Instrument Services, Inc. (Licensed under SIMION 8.0)
-
-with enhancements by
-Patrick Sturm
-(c) 2013-2017 TOFWERK
---]]
+-- collision_hs1.lua
+-- A hard-sphere, elastic, ion-neutral collision model for SIMION 8.
+-- REVISION-6-2009-10-02
+--
+-- The code implements a rather complete hard-sphere collision model.
+-- Collision models are useful for simulating non-vacuum conditions, in
+-- which case ions collide against a background gas and are deflected
+-- randomly.
+--
+-- Features and assumptions of the model:
+-- - Ion collisions follow the hard-sphere collision model.
+--     Energy transfers occur solely via these collisions.
+-- - Ion collisions are elastic.
+-- - Background gas is assumed neutral in charge.
+-- - Background gas velocity follows the Maxwell-Boltzmann distribution.
+-- - Background gas mean velocity may be non-zero.
+-- - Kinetic cooling and heating of ions due to collisions
+-- -   are simulated.
+-- - Kinetic cooling and heating of background gas is assumed
+--     negligible over many collisions.
+--
+-- Note on time-steps: each individual ion-gas collision is modeled,
+-- which requires the time-step to be some fraction of mean-free-path.
+-- Therefore, simulations with frequent collisions (i.e. higher
+-- pressure) can be computationally intensive.
+--
+-- This code does not account for absorptions (e.g. when using electrons
+-- rather than ions).  That can be easily supported by setting ion_splat,
+-- likely as a function of impact_offset.
+--
+-- The code has been influenced by a variety of prior SIMION hard-sphere
+-- collision models:
+--   [Dahl] _Trap/INJECT.PRG in SIMION 7.0
+--   [Dahl2] http://www.simion.com/examples/dahl_drag.prg
+--   [Appelhans2001] http://dx.doi.org/10.1016/S1387-3806(02)00627-9
+--   [Ding2002] http://dx.doi.org/10.1016/S1387-3806(02)00921-1
+--   [Ling1997]
+--   http://dx.doi.org/10.1002/(SICI)1097-0231(19970830)11:13<1467::AID-RCM54>3.0.CO;2-X
+-- See also ( http://www.simion.com/info/Ion-Gas_Collisions ).
+--
+-- Additional mathematic derivations are in notes.pdf.
+--
+-- Author David Manura, 2005-06/2011
+-- (c) 2006-2011 Scientific Instrument Services, Inc. (Licensed under SIMION 8.0)
+--
+-- with enhancements by
+-- Patrick Sturm
+-- (c) TOFWERK, 2013-2021
 
 simion.workbench_program()
 
@@ -57,18 +55,18 @@ HS1.segment = {}
 -- Mean free path (MFP) (mm) between collisions.
 -- Set to -1 (recommended) to calculate this automatically from
 -- pressure and temperature.
-adjustable _mean_free_path_mm = -1
+adjustable mean_free_path_mm = -1
 
 -- Mass of background gas particle (amu)
-adjustable _gas_mass_amu = 29.0
+adjustable gas_mass_amu = 29.0
 
 -- Background gas temperature (K)
-adjustable _temperature_k = 293.0
+adjustable temperature_k = 293.0
 
 -- Background gas pressure (Pa)
 -- Note: (Pa/mtorr) = 0.13328.
 -- One of the benchmarks uses 0.53 Pa (4 mTorr) here.
-adjustable _pressure_pa = 1e-5
+adjustable pressure_pa = 1e-5
 
 -- Collision-cross section (m^2)
 -- (The diameter of the cross-sectional area is roughly
@@ -79,18 +77,18 @@ adjustable _pressure_pa = 1e-5
 --   i.e. 2.46e-19 collision cross-section)
 -- (2.27E-18 is for collision between He and some 200 amu ion with combined
 --  collision diameter of 2 + 15 angstroms.  It is used in some benchmarks.)
-adjustable _sigma_m2 = 2.27E-18 
+adjustable sigma_m2 = 2.27E-18 
 
 -- Mean background gas velocity (mm/usec) in x,y,z directions.
 -- Normally, these are zero.
-adjustable _vx_bar_gas_mmusec = 0
-adjustable _vy_bar_gas_mmusec = 0
-adjustable _vz_bar_gas_mmusec = 0
+adjustable vx_bar_gas_mmusec = 0
+adjustable vy_bar_gas_mmusec = 0
+adjustable vz_bar_gas_mmusec = 0
 
 -- Mean number of time steps per MFP.
 -- Typically this default is ok.  We want sufficient number of
 -- time-steps per mean-free path for this code to be reliable.
-adjustable _steps_per_MFP = 20.0
+adjustable steps_per_MFP = 20.0
 
 -- This controls the reproducibility of the random number generator,
 -- which affects whether runs are repeatable.
@@ -99,7 +97,7 @@ adjustable _steps_per_MFP = 20.0
 --   n > 1 - seed random number generator with n-1, allowing runs to be repeatable.
 -- Note: if using n > 1, also make sure particle definitions are not randomized
 -- (convert to "How are particles defined?" = "Individually (.ION)" if necessary).
-adjustable _random_seed = 0
+adjustable random_seed = 0
 
 -- pst: set seed of random number generator to get repeatable sequences of random numbers
 math.randomseed(0) -- Lua random number generator
@@ -111,14 +109,14 @@ simion.seed(0) -- SIMION random number generator
 --   on *all* ions whenever *any* ion has a collision (this
 --   is not really what we want, but it's how the mark()
 --   command works).
-adjustable _mark_collisions = 0
+adjustable mark_collisions = 0
 
 -- How much trace data (average KE) to output.
 -- (0=none, 1=at each splat, 2=at each collision)
-adjustable _trace_level = 0
+adjustable trace_level = 0
 -- If _trace_level is 2, this is the number of collisions before each trace.
 -- This reduces the verbosity of the trace.
-adjustable _trace_skip = 100
+adjustable trace_skip = 100
 
 
 ---- Internal variables
@@ -191,7 +189,7 @@ local last_collision_times = {} -- last collision time for each particle.
                                 --   maps ion_number --> time.
 local trace_count = 0           -- Count relative to _trace_skip
 local function record_ke_other_actions()
-    if not(_trace_level >= 1) then return end
+    if not(trace_level >= 1) then return end
 
     -- Compute new ion speed and KE.
     local speed_ion2 = sqrt(ion_vx_mm^2 + ion_vy_mm^2 + ion_vz_mm^2)
@@ -213,32 +211,32 @@ local function record_ke_other_actions()
     -- update average ion KE
     ke_averages[ion_number] = w * (ke_averages[ion_number] or ke2_ion)
                             + (1-w) * ke2_ion
-    if _trace_level >= 2 then -- more detail
+    if trace_level >= 2 then -- more detail
         local T_ion = ke_averages[ion_number] / eV_J / (1.5 * k)
-        if trace_count % _trace_skip == 0 then
+        if trace_count % trace_skip == 0 then
             print(string.format(
-                "n=,%d,TOF=,%0.3g,ion KE (eV)=,%0.3e,ion mean KE (eV)=," ..
-                "%0.3e,ion mean temp (K)=,%0.3e",
+                "n=%d, TOF=%0.3g, ion KE (eV)=%0.3e, ion mean KE (eV)=" ..
+                "%0.3e, ion mean temp (K)=%0.3e",
                 ion_number, ion_time_of_flight, ke2_ion,
                 ke_averages[ion_number], T_ion))
         end
-        trace_count = (trace_count + 1) % _trace_skip
+        trace_count = (trace_count + 1) % trace_skip
     end
     last_collision_times[ion_number] = ion_time_of_flight
 end
 local function record_ke_terminate()
-    if _trace_level >= 1 then
+    if trace_level >= 1 then
         -- ion temperature
         local T_ion = ke_averages[ion_number] / eV_J / (1.5 * k)
         print(string.format(
-            "n=,%d,TOF=,%0.3g,ion mean KE (eV)=,%0.3e,ion mean temp (K)=,%0.3e",
+            "n=%d, TOF=%0.3g, ion mean KE (eV)=%0.3e, ion mean temp (K)=%0.3e",
             ion_number, ion_time_of_flight, ke_averages[ion_number], T_ion))
     end
 end
 
 local is_initialized = false
 local function init()
-    if _random_seed ~= 0 then seed(_random_seed-1) end
+    if random_seed ~= 0 then seed(random_seed-1) end
     
     if HS1.init then HS1.init() end
     is_initialized = true
@@ -261,11 +259,10 @@ function segment.tstep_adjust()
 end
 HS1.segment.tstep_adjust = segment.tstep_adjust
 
-
 -- added by pst
-i_col = 1 -- collision number index
-ke_precol = {} -- ke of ions before collisions
-r_x = {} -- distance from x-axis
+local i_col = 1 -- collision number index
+local ke_precol = {} -- ke of ions before collisions
+local r_x = {} -- distance from x-axis
 
 -- SIMION other actions segment. Called on every time step.
 function segment.other_actions()
@@ -273,7 +270,7 @@ function segment.other_actions()
 
     -- Obtain pressure, temperature, and velocity at current "local"
     -- particle position.  Normally, these are obtained from the adjustable
-    -- variables (_pressure_pa, _temperature_k, _vx_bar_gas_mmusec,
+    -- variables (pressure_pa, _temperature_k, _vx_bar_gas_mmusec,
     -- _vy_bar_gas_mmusec, and _vz_bar_gas_mmusec adjustable variables).
     -- They may be individually overridden by defining HS1.pressure,
     -- HS1.temperature, and HS1.velocity functions.  The components of
@@ -283,20 +280,20 @@ function segment.other_actions()
     -- (grid units); however, you may alternately ignore the arguments and
     -- use ion_px_mm, ion_py_mm, and ion_pz_mm variables in these functions.
     local local_pressure_pa = HS1.pressure and
-        HS1.pressure(ion_px_mm, ion_py_mm, ion_pz_mm) or _pressure_pa
+        HS1.pressure(ion_px_mm, ion_py_mm, ion_pz_mm) or pressure_pa
     local local_temperature_k = HS1.temperature and
-        HS1.temperature(ion_px_mm, ion_py_mm, ion_pz_mm) or _temperature_k
+        HS1.temperature(ion_px_mm, ion_py_mm, ion_pz_mm) or temperature_k
     local local_velocity_x_mmusec,local_velocity_y_mmusec,local_velocity_z_mmusec
     if HS1.velocity then
         local_velocity_x_mmusec,local_velocity_y_mmusec,local_velocity_z_mmusec
             = HS1.velocity(ion_px_mm, ion_py_mm, ion_pz_mm)
     else
         local_velocity_x_mmusec = HS1.velocity_x and
-            HS1.velocity_x(ion_px_mm, ion_py_mm, ion_pz_mm) or _vx_bar_gas_mmusec
+            HS1.velocity_x(ion_px_mm, ion_py_mm, ion_pz_mm) or vx_bar_gas_mmusec
         local_velocity_y_mmusec = HS1.velocity_y and
-            HS1.velocity_y(ion_px_mm, ion_py_mm, ion_pz_mm) or _vy_bar_gas_mmusec
+            HS1.velocity_y(ion_px_mm, ion_py_mm, ion_pz_mm) or vy_bar_gas_mmusec
         local_velocity_z_mmusec = HS1.velocity_z and
-            HS1.velocity_z(ion_px_mm, ion_py_mm, ion_pz_mm) or _vz_bar_gas_mmusec
+            HS1.velocity_z(ion_px_mm, ion_py_mm, ion_pz_mm) or vz_bar_gas_mmusec
     end
 
     if local_pressure_pa == 0 then  -- collisions disabled
@@ -318,18 +315,18 @@ function segment.other_actions()
 
     -- Compute mean-free-path.
     -- > See notes.pdf for discussion on the math.
-    if _mean_free_path_mm > 0 then -- explicitly specified
-        effective_mean_free_path_mm = _mean_free_path_mm
+    if mean_free_path_mm > 0 then -- explicitly specified
+        effective_mean_free_path_mm = mean_free_path_mm
     else  -- calculate from current ion velocity
         -- Note: in some cases, mean-free-path will not change significantly, so
         -- we don't need to recompute it on every time step.  But it is simpler
         -- and less error prone to do so and doesn't affect run times much.
         do
             -- Compute mean gas speed (mm/us)
-            local c_bar_gas = sqrt(8*k*local_temperature_k/pi/(_gas_mass_amu * kg_amu)) / 1000
+            local c_bar_gas = sqrt(8*k*local_temperature_k/pi/(gas_mass_amu * kg_amu)) / 1000
 
             -- Compute median gas speed (mm/us)
-            local c_star_gas = sqrt(2*k*local_temperature_k/(_gas_mass_amu * kg_amu)) / 1000
+            local c_star_gas = sqrt(2*k*local_temperature_k/(gas_mass_amu * kg_amu)) / 1000
 
             -- Compute mean relative speed (mm/us) between gas and ion.
             local s = speed_ion / c_star_gas
@@ -338,12 +335,11 @@ function segment.other_actions()
 
             -- Compute mean-free-path (mm)
             effective_mean_free_path_mm = 1000 * k * local_temperature_k *
-                (speed_ion / c_bar_rel) / (local_pressure_pa * _sigma_m2)
-
+                (speed_ion / c_bar_rel) / (local_pressure_pa * sigma_m2)
 
             --print("DEBUG:ion[c],gas[c_bar],c_bar_rel,MFP=",
             --      speed_ion, c_bar_gas, c_bar_rel, effective_mean_free_path_mm)
-
+			
             -- Note: The following is a simpler and almost as suitable
             -- approximation for c_bar_rel, which you may use instead:
             -- c_bar_rel = sqrt(speed_ion^2 + c_bar_gas^2)
@@ -351,7 +347,7 @@ function segment.other_actions()
     end
 
     -- Limit time-step size to a fraction of the MFP.
-    max_timestep = effective_mean_free_path_mm / speed_ion / _steps_per_MFP
+    max_timestep = effective_mean_free_path_mm / speed_ion / steps_per_MFP
 
     -- Compute probability of collision in current time-step.
     -- > For an infinitesimal distance (dx) traveled, the increase in the
@@ -369,17 +365,14 @@ function segment.other_actions()
     -- Test for collision.
     if rand() > collision_prob then
         return -- no collision
-    else -- added by pst
-        collided[ion_number] = true
-        return
     end
 
-    --  KE of ion just before collision, added by pst
+	--  KE of ion just before collision, added by pst
     ke_precol[i_col] = speed_to_ke(sqrt(vx^2 + vy^2 + vz^2), ion_mass)
-    --  distance from x-axis
-    r_x[i_col] = sqrt(ion_py_mm^2 + ion_pz_mm^2)
-    i_col = i_col + 1
-
+	--  distance from x-axis
+	r_x[i_col] = sqrt(ion_py_mm^2 + ion_pz_mm^2)
+	i_col = i_col + 1
+	
     ----- Handle collision.
 
     -- Compute standard deviation of background gas velocity in
@@ -388,7 +381,7 @@ function segment.other_actions()
     --   one dimension is normally distributed with standard
     --   deviation sqrt(kT/m).
     local vr_stdev_gas =
-        sqrt(k * local_temperature_k / (_gas_mass_amu * kg_amu)) / 1000
+        sqrt(k * local_temperature_k / (gas_mass_amu * kg_amu)) / 1000
 
     -- Compute velocity of colliding background gas particle.
     -- > For the population of background gas particles that collide with the
@@ -495,8 +488,8 @@ function segment.other_actions()
     -- (in the current reference frame).
     -- Note that the force acts only in the radial direction, which is
     -- normal to the surfaces at the point of contact.
-    local vr_ion2 = (vr_ion * (ion_mass - _gas_mass_amu))
-                  / (ion_mass + _gas_mass_amu)
+    local vr_ion2 = (vr_ion * (ion_mass - gas_mass_amu))
+                  / (ion_mass + gas_mass_amu)
 
     -- Rotate velocity reference frame so that original ion velocity
     -- vector is on the +y axis.
@@ -530,9 +523,9 @@ function segment.other_actions()
     -- Compute running average of KE.  This is for statistical reporting only.
     -- At thermal equilibrium, KE of the ion and KE of the gas would
     -- be approximately equal according to theory.
-    if _trace_level ~= 0 then record_ke_other_actions() end
+    if trace_level ~= 0 then record_ke_other_actions() end
 
-    if _mark_collisions ~= 0 then
+    if mark_collisions ~= 0 then
         mark() -- draw dot at collision point
     end
 end
@@ -556,7 +549,7 @@ function segment.efield_adjust()
      -- gas causes ions to collect near the center of the well.
      --   V(x,y,z) = x*x + y*y* + z*z = r*r
      --   E(x,y,z) = -(2*x, 2*y, 2*z)
-    r_max = 100   -- radius
+    r_max = 100  -- radius
     V_max = 10    -- voltage at r_max
     a = 2 * V_max / (r_max * r_max)
     ion_dvoltsx_gu = ion_px_gu * a

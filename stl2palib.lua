@@ -216,7 +216,7 @@ end
 -- Hash the triangle bounding boxes to a 2D grid ------------------------------
 -- The output is a 3D array, where the first two dimensions are
 -- the grid point indices and the third dimension is a vector
--- where the n-th element is 1 if the n-th bounding box is inside the grid cell
+-- where the n-th element is 0 if the n-th bounding box is inside the grid cell
 -- and nil if it is completely outside. 
 local function map2Grid(t_faces, t_size, dx_mm, dy_mm)
 	local xmin = math.floor(t_size[1]/dx_mm)*dx_mm
@@ -227,15 +227,15 @@ local function map2Grid(t_faces, t_size, dx_mm, dy_mm)
 	local t_hash = {}
 	for i=1,(xmax-xmin)/dx_mm+1 do  -- loop over x axis
 		t_hash[i] = {}
+		-- convert the grid point indices to min and max
+		-- values of the grid cell boundary
+		local x0 = (i-1)*dx_mm + xmin
+		local x1 = (i)*dx_mm + xmin
 		for j=1,(ymax-ymin)/dy_mm+1 do  -- loop over y axis
 			t_hash[i][j] = {}
+			local y0 = (j-1)*dx_mm + ymin
+			local y1 = (j)*dx_mm + ymin
 			for k,v in ipairs(t_bb) do  -- loop over bounding boxes
-				-- convert the grid point indices to min and max
-				-- values of the grid cell boundary
-				local x0 = (i-1)*dx_mm + xmin
-				local y0 = (j-1)*dx_mm + ymin
-				local x1 = (i)*dx_mm + xmin
-				local y1 = (j)*dx_mm + ymin
 				-- check if the bounding box touches the grid cell
 				if (doRectaglesOverlap(x0,x1,y0,y1,v[1],v[2],v[3],v[4])) then
 					t_hash[i][j][k] = 0
