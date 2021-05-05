@@ -218,23 +218,23 @@ end
 -- the grid point indices and the third dimension is a vector
 -- where the n-th element is 0 if the n-th bounding box is inside the grid cell
 -- and nil if it is completely outside. 
-local function map2Grid(t_faces, t_size, dx_mm, dy_mm)
-	local xmin = math.floor(t_size[1]/dx_mm)*dx_mm
-	local xmax = math.floor(t_size[2]/dx_mm)*dx_mm
-	local ymin = math.floor(t_size[3]/dy_mm)*dy_mm
-	local ymax = math.floor(t_size[4]/dy_mm)*dy_mm
+local function map2Grid(t_faces, t_size, dx_mm, dy_mm, xmin, xmax, ymin, ymax)
+	local x_min = math.max(math.floor(t_size[1]/dx_mm)*dx_mm, xmin)
+	local x_max = math.min(math.floor(t_size[2]/dx_mm)*dx_mm, xmax)
+	local y_min = math.max(math.floor(t_size[3]/dy_mm)*dy_mm, ymin)
+	local y_max = math.min(math.floor(t_size[4]/dy_mm)*dy_mm, ymax)
 	local t_bb = boundingBoxes(t_faces)
 	local t_hash = {}
-	for i=1,(xmax-xmin)/dx_mm+1 do  -- loop over x axis
+	for i=1,(x_max-x_min)/dx_mm+1 do  -- loop over x axis
 		t_hash[i] = {}
 		-- convert the grid point indices to min and max
 		-- values of the grid cell boundary
-		local x0 = (i-1)*dx_mm + xmin
-		local x1 = (i)*dx_mm + xmin
-		for j=1,(ymax-ymin)/dy_mm+1 do  -- loop over y axis
+		local x0 = (i-1)*dx_mm + x_min
+		local x1 = (i)*dx_mm + x_min
+		for j=1,(y_max-y_min)/dy_mm+1 do  -- loop over y axis
 			t_hash[i][j] = {}
-			local y0 = (j-1)*dx_mm + ymin
-			local y1 = (j)*dx_mm + ymin
+			local y0 = (j-1)*dx_mm + y_min
+			local y1 = (j)*dx_mm + y_min
 			for k,v in ipairs(t_bb) do  -- loop over bounding boxes
 				-- check if the bounding box touches the grid cell
 				if (doRectaglesOverlap(x0,x1,y0,y1,v[1],v[2],v[3],v[4])) then
@@ -457,15 +457,15 @@ function STL2PA.convert(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm,
 			io.write(i.."/"..#files.." Generating STL hash table for "..v.."... ")
 			io.flush()
 			start_time = os.clock()
-			local t_hash = map2Grid(t_faces, t_size, dx_mm, dy_mm)
+			local t_hash = map2Grid(t_faces, t_size, dx_mm, dy_mm, xmin, xmax, ymin, ymax)
 			end_time1 = os.clock()
 			io.write(" [Finished in "..string.format("%.3f", end_time1-start_time).." s]\n")
 			io.write(i.."/"..#files.." Building PA... ")
 			io.flush()
-			local xminstl = math.floor(t_size[1]/dx_mm)*dx_mm
-			local xmaxstl = math.ceil(t_size[2]/dx_mm)*dx_mm
-			local yminstl = math.floor(t_size[3]/dy_mm)*dy_mm
-			local ymaxstl = math.ceil(t_size[4]/dy_mm)*dy_mm
+			local xminstl = max(math.floor(t_size[1]/dx_mm)*dx_mm, xmin)
+			local xmaxstl = min(math.ceil(t_size[2]/dx_mm)*dx_mm, xmax)
+			local yminstl = max(math.floor(t_size[3]/dy_mm)*dy_mm, ymin)
+			local ymaxstl = min(math.ceil(t_size[4]/dy_mm)*dy_mm, ymax)
 			local zminstl = t_size[5]
 			local zmaxstl = t_size[6]
 			pa:fill { 
@@ -491,15 +491,18 @@ function STL2PA.convert(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm,
 	else
 		local t_faces = STL2PA.readSTL(stl_filename)
 		local t_size = STL2PA.stlSize(t_faces)
-		io.write("Generating STL hash table for "..stl_filename.."\n")
+		io.write("Generating STL hash table for "..stl_filename.."... ")
 		io.flush()
-		local t_hash = map2Grid(t_faces, t_size, dx_mm, dy_mm)
+		start_time = os.clock()
+		local t_hash = map2Grid(t_faces, t_size, dx_mm, dy_mm, xmin, xmax, ymin, ymax)
+		end_time1 = os.clock()
+		io.write(" [Finished in "..string.format("%.3f", end_time1-start_time).." s]\n")
 		io.write("Building PA...\n")
 		io.flush()
-		local xminstl = math.floor(t_size[1]/dx_mm)*dx_mm
-		local xmaxstl = math.ceil(t_size[2]/dx_mm)*dx_mm
-		local yminstl = math.floor(t_size[3]/dy_mm)*dy_mm
-		local ymaxstl = math.ceil(t_size[4]/dy_mm)*dy_mm
+		local xminstl = max(math.floor(t_size[1]/dx_mm)*dx_mm, xmin)
+		local xmaxstl = min(math.ceil(t_size[2]/dx_mm)*dx_mm, xmax)
+		local yminstl = max(math.floor(t_size[3]/dy_mm)*dy_mm, ymin)
+		local ymaxstl = min(math.ceil(t_size[4]/dy_mm)*dy_mm, ymax)
 		local zminstl = t_size[5]
 		local zmaxstl = t_size[6]
 		pa:fill { 
@@ -565,15 +568,19 @@ function STL2PA.modify(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, electro
 
 	local dx_mm = pa.dx_mm
 	local dy_mm = pa.dy_mm
-	io.write("Generating STL hash table for "..path..string.gsub(name, "%-%%", "-"..electrode_no)..".stl".."\n")
+	io.write("Generating STL hash table for "..path..string.gsub(name, "%-%%", "-"..electrode_no)..".stl".."... ")
 	io.flush()
-	local t_hash = map2Grid(t_faces, t_size, dx_mm, dy_mm)
+	local t_hash = map2Grid(t_faces, t_size, dx_mm, dy_mm, xmin, xmax, ymin, ymax)
+	start_time = os.clock()
+	local t_hash = map2Grid(t_faces, t_size, dx_mm, dy_mm, xmin, xmax, ymin, ymax)
+	end_time1 = os.clock()
+	io.write(" [Finished in "..string.format("%.3f", end_time1-start_time).." s]\n")
 	io.write("Building PA...\n")
 	io.flush()
-	local xminstl = math.floor(t_size[1]/dx_mm)*dx_mm
-	local xmaxstl = math.ceil(t_size[2]/dx_mm)*dx_mm
-	local yminstl = math.floor(t_size[3]/dy_mm)*dy_mm
-	local ymaxstl = math.ceil(t_size[4]/dy_mm)*dy_mm
+	local xminstl = max(math.floor(t_size[1]/dx_mm)*dx_mm, xmin)
+	local xmaxstl = min(math.ceil(t_size[2]/dx_mm)*dx_mm, xmax)
+	local yminstl = max(math.floor(t_size[3]/dy_mm)*dy_mm, ymin)
+	local ymaxstl = min(math.ceil(t_size[4]/dy_mm)*dy_mm, ymax)
 	local zminstl = t_size[5]
 	local zmaxstl = t_size[6]
 	pa:fill { 
@@ -702,5 +709,27 @@ function STL2PA.boundingBox(stl_filename, bounding, xmin, xmax, ymin, ymax, zmin
 	pa:save(file)
 	simion.pas:close()  -- remove all PAs from RAM.
 end
+
+
+-- remove one electrode of an existing PA# array ---------------------
+function STL2PA.removeElectrode(stl_filename, electrode_no)
+	local path,name = splitPath(stl_filename)
+
+	writeHeader()
+
+	simion.pas:close()  -- remove all PAs from RAM.
+	pa = simion.pas:open(path..string.gsub(name, "%-%%", "")..".pa#")  -- open pa# file
+
+	-- delete electrode
+	for xi,yi,zi in pa:points() do
+		if pa:potential(xi,yi,zi) == electrode_no then
+			pa:point(xi,yi,zi, 0, false)
+		end
+	end
+
+	pa:save(path..string.gsub(name, "%-%%", "")..".pa#")
+	simion.pas:close()  -- remove all PAs from RAM.
+end
+
 
 return STL2PA
