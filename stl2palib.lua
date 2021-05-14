@@ -15,10 +15,11 @@ The main advantages compared to the stl2pa command from SIMION SL Tools are:
 Multi-electrode systems are handled as in SL Tools with the "%" character
 as a placeholder in the STL file name.
 
-The conversion functions have been optimized for speed (but are still
-considerably slower than the SL Tools conversion, because of the different
+The conversion functions have been optimized for speed, but are still
+slower than the SL Tools conversion (because of the different
 approach and the lua instead of C++ implementation).
 
+The input STL needs to be watertight and must not contain joined faces. 
 
 Example:
 	-- load STL2PA library
@@ -568,6 +569,7 @@ function STL2PA.modify(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, electro
 
 	local dx_mm = pa.dx_mm
 	local dy_mm = pa.dy_mm
+	local dz_mm = pa.dz_mm
 	io.write("Generating STL hash table for "..path..string.gsub(name, "%-%%", "-"..electrode_no)..".stl".."... ")
 	io.flush()
 	local t_hash = map2Grid(t_faces, t_size, dx_mm, dy_mm, xmin, xmax, ymin, ymax)
