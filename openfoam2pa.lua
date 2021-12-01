@@ -5,38 +5,48 @@ Converts OpenFOAM data file to SIMION PA files.
 OpenFOAM is an open source software for computational fluid dynamics (CFD) 
 https://openfoam.org/
 
-This will create one SIMION PA for each scalar component.
+This will create one SIMION PA for each scalar component (T, U_x, U_y, U_z, p).
 
-In ParaView apply a PointVolumeInterpolator filter with the box size 
-the same as the PA size and the resolution and cell size as desired.
+How to export OpenFOAM data:
+In ParaView apply a MergeBlocks filter and then a PointVolumeInterpolator 
+filter with the box size and the resolution as desired (does not need to 
+be the same as in the SIMION geometry PA). Note that a resolution of 
+e.g. 10x10x10 gives 11x11x11 grid points.
 Then save the data as csv file (Choose T, U and p arrays and select
 Point Data).
 
-Some adjustment to this program may be necessary for your own purposes.
+How to run this script:
+Adjust the filename, number of grid points, domain size and symmetry
+and run the script.
 
 Patrick Sturm
 (c) 2018-2021 TOFWERK
 --]]
 
+-------------------------------------------------------------------------------
 local filename = "C:/Users/pst/OpenFOAM/data.csv"
 
--- grid size (same as in CSV input file)
-local nx = 52
-local ny = 52
-local nz = 104
+-- number of grid points (same as in csv input file)
+local nx = 11
+local ny = 11
+local nz = 11
 
--- domain size, in mm (same as in CSV input file)
-local xmin = -13
-local xmax = 13
-local ymin = -13
-local ymax = 13
-local zmin = -12
-local zmax = 40
+-- domain size, in mm (same as in csv input file)
+local xmin = -5
+local xmax = 5
+local ymin = -5
+local ymax = 5
+local zmin = -5
+local zmax = 5
 
-local dx = (xmax - xmin) / nx
-local dy = (ymax - ymin) / ny
-local dz = (zmax - zmin) / nz
+-- set symmetry and mirroring type, e.g. '3dplanar[xy]' 
+local symmetry = '3dplanar'  
+-------------------------------------------------------------------------------
 
+
+local dx = (xmax - xmin) / (nx-1)
+local dy = (ymax - ymin) / (ny-1)
+local dz = (zmax - zmin) / (nz-1)
 
 -- string split http://lua-users.org/wiki/SplitJoin
 function split(s, pat)
@@ -90,7 +100,8 @@ local function convert_file(filename, pa_filename_prefix)
 
   -- Create PA object.
   local pa = simion.pas:open()
-  pa:size(nx+1,ny+1,nz+1)  -- Note for example that nx = 10 means ten grid points that define the boundary of 9 cells, giving a physical size of 9 grid units.
+  pa:size(nx,ny,nz)  -- Note for example that nx = 11 means ten grid points that define the boundary of 10 cells, giving a physical size of 10 grid units.
+  pa.symmetry = symmetry  -- set symmetry and mirroring type
   pa.refinable = false  -- prevent SIMION prompting to refine this PA.
   pa.dx_mm = dx
   pa.dy_mm = dy
@@ -101,9 +112,9 @@ local function convert_file(filename, pa_filename_prefix)
   for j=1,5 do
     local col = cols[j]
     for i=0,#col-1 do
-      local xi = i % (nx+1)
-      local yi = math.floor(i/(nx+1)) % (ny+1)
-      local zi = math.floor(i/((nx+1)*(ny+1)))
+      local xi = i % nx
+      local yi = math.floor(i/nx) % ny
+      local zi = math.floor(i/(nx*ny))
       pa:potential(xi,yi,zi, col[i+1])
     end
     pa:save(pa_filename_prefix .. '_' .. names[j] .. '.pa')
