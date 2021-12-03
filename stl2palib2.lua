@@ -587,21 +587,6 @@ local function get_neighbours(t_faces)
 end
 
 
--- recursivley add all triangles that are neighbours of i-th triangle ---------
--- using tail recursion
-local function recursiveAdd(i, children)
-	isAdded[i] = true
-	table.insert(children, i)  -- add i-th triangle to children
-	for j,v in pairs(t_neighbour[i]) do  -- loop through all neighbours of i-th triangle
-		if not isAdded[v] then  -- if v-th trianlgle has not been added yet
-			return recursiveAdd(t_neighbour[i][j], children)  -- add j-th triangle recursively
-		else
-			return children
-		end
-	end
-end
-
-
 -- get list of all triangles connected to the i-th triangle -------------------
 local function get_island(t_faces, i)
 	t_neighbour = get_neighbours(t_faces)
@@ -609,14 +594,24 @@ local function get_island(t_faces, i)
 	for i=1,#t_faces do
 		isAdded[i] = false
 	end
-	local island_list = {}
-	-- for i=1,#t_faces do  -- all islands of connected triangles
-	-- 	if not isAdded[i] then
-	local children = {}
-	table.insert(island_list, recursiveAdd(i, children))
-	-- 	end
-	-- end
-	return island_list
+	isAdded[i] = true
+	local island = t_neighbour[i]  -- initialize with all neighbours of i-th triangle
+	for k,v in pairs(island) do
+		isAdded[v] = true
+	end	
+	local j = 1
+	local n = #island
+	while j <= n do  -- loop through all triangles in island 
+		for k,v in pairs(t_neighbour[island[j]]) do  -- loop through all neighbours of island[j]-th triangle
+			if not isAdded[v] then  -- if v-th trianlgle has not been added yet
+				island[n+1] = t_neighbour[island[j]][k]  -- append to island
+				n = n + 1
+				isAdded[v] = true
+			end
+		end
+		j = j + 1
+	end
+	return island
 end
 
 
@@ -648,9 +643,9 @@ function STL2PA.convert(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm,
 		io.flush()
 		start_time = os.clock()
 		local ii = find_closest_triangle(e[i][2], t_faces)  -- index of closest triangle
-		local island_list = get_island(t_faces, ii)  -- indices of triangles belonging to group of ii-th triangle
+		local island = get_island(t_faces, ii)  -- indices of triangles belonging to group of ii-th triangle
 		local t_faces2 = {}
-		for j,v in pairs(island_list[1]) do
+		for j,v in pairs(island) do
 			-- We use a Z-ray intersection so we can ignore facets that
 			-- are purely vertically oriented (have zero Z-component).
 			if t_faces[v][1][3]~=0 then
