@@ -232,8 +232,8 @@ local function map2Grid(t_faces, t_size, dx_mm, dy_mm, xmin, xmax, ymin, ymax)
 		local x1 = (i)*dx_mm + x_min
 		for j=1,(y_max-y_min)/dy_mm+1 do  -- loop over y axis
 			t_hash[i][j] = {}
-			local y0 = (j-1)*dx_mm + y_min
-			local y1 = (j)*dx_mm + y_min
+			local y0 = (j-1)*dy_mm + y_min
+			local y1 = (j)*dy_mm + y_min
 			for k,v in ipairs(t_bb) do  -- loop over bounding boxes
 				-- check if the bounding box touches the grid cell
 				if (doRectaglesOverlap(x0,x1,y0,y1,v[1],v[2],v[3],v[4])) then
@@ -429,7 +429,7 @@ function STL2PA.removeBoundingBox(stl_filename, bounding, xmin, xmax, ymin, ymax
 	local path,name = splitPath(stl_filename)
 	local file = path..name..".pa#"
 
-	io.write("Adding bounding box "..bounding.."\n")
+	io.write("Removing bounding box "..bounding.."\n")
 	io.flush()
 
 	simion.pas:close()  -- remove all PAs from RAM.
@@ -763,6 +763,35 @@ function STL2PA.modify(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, surface
 	end
 
 	pa:save(path..name..".pa#")
+	simion.pas:close()  -- remove all PAs from RAM.
+end
+
+
+-- add ideal grid or wire grid in .pa# file -----------------------------------
+function STL2PA.addGrid(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm, 
+	dy_mm, dz_mm, pitch, direction, voltage)
+
+	local path,name = splitPath(stl_filename)
+	local file = path..name..".pa#"
+	local p = pitch or 0
+	local d = direction or "x"
+	local v = voltage or 0
+
+	io.write("Adding grid\n")
+	io.flush()
+
+	simion.pas:close()  -- remove all PAs from RAM.
+	pa = simion.pas:open(file)  -- open pa# file
+
+	for xi=xmin/dx_mm, xmax/dy_mm do
+		for yi=ymin/dy_mm, ymax/dy_mm do
+			for zi=zmin/dz_mm, zmax/dz_mm do
+				pa:point(xi,yi,zi, v,true)
+			end
+		end
+	end
+
+	pa:save(file)
 	simion.pas:close()  -- remove all PAs from RAM.
 end
 

@@ -235,8 +235,8 @@ local function map2Grid(t_faces, t_size, dx_mm, dy_mm, xmin, xmax, ymin, ymax)
 		local x1 = (i)*dx_mm + x_min
 		for j=1,(y_max-y_min)/dy_mm+1 do  -- loop over y axis
 			t_hash[i][j] = {}
-			local y0 = (j-1)*dx_mm + y_min
-			local y1 = (j)*dx_mm + y_min
+			local y0 = (j-1)*dy_mm + y_min
+			local y1 = (j)*dy_mm + y_min
 			for k,v in ipairs(t_bb) do  -- loop over bounding boxes
 				-- check if the bounding box touches the grid cell
 				if (doRectaglesOverlap(x0,x1,y0,y1,v[1],v[2],v[3],v[4])) then
