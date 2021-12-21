@@ -11,4 +11,4 @@ There are enhanced versions of SIMION's
 existing Lua scripts as well as additional useful tools.
 
 Patrick Sturm\
-\(c) 2020 TOFWERK
+\(c) 2020-2022 TOFWERK

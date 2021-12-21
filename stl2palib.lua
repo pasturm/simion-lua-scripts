@@ -3,8 +3,6 @@ stl2palib.lua
 
 Library to convert an electrode geometry from STL files to a SIMION potential array file.
 
-Note: this is now largely obsolete with SIMION >= 8.2.0.11-20210626
-
 The main advantages compared to the stl2pa command from SIMION SL Tools (< 8.2.0.11) are:
 1. The STL surface is filled with solid points (avoids the solid points 
    strategy issues of SL Tools).
@@ -16,11 +14,10 @@ The main advantages compared to the stl2pa command from SIMION SL Tools (< 8.2.0
 Multi-electrode systems are handled as in SL Tools with the "%" character
 as a placeholder in the STL file name.
 
-The conversion functions have been optimized for speed, but are still
-slower than the SL Tools conversion (because of the different
-approach and the lua instead of C++ implementation).
+The input STL needs to be watertight and must not contain joined faces.
 
-The input STL needs to be watertight and must not contain joined faces. 
+Note: SIMION 8.2.0.11-20210626 SL Tools now contains similar functionality. But there are still bugs
+and it is slower than this lua script.
 
 Example:
 	-- load STL2PA library
@@ -60,7 +57,7 @@ Example:
 
 
 Patrick Sturm
-(c) 2021 TOFWERK
+(c) 2020-2022 TOFWERK
 --]]
 
 local STL2PA = {}
@@ -114,18 +111,13 @@ function STL2PA.readSTL(stl_filename)
 		for line in fh:lines() do
 			if string.find(line, "^%s*facet normal") then
 				local x,y,z = string.match(line, "(%S+)%s(%S+)%s(%S+)$")
-				z0 = tonumber(z)
 				table.insert(current_face, {tonumber(x),tonumber(y),tonumber(z)})
 			elseif string.find(line, "^%s*vertex") then
 				local x,y,z = string.match(line, "(%S+)%s(%S+)%s(%S+)$")
 				table.insert(current_face, {tonumber(x),tonumber(y),tonumber(z)})
 				count = count + 1
 				if count == 3 then
-					-- We use a Z-ray intersection so we can ignore facets that
-					-- are purely vertically oriented (have zero Z-component).
-					if z0 ~= 0 then
-						table.insert(t_faces,current_face)
-					end
+					table.insert(t_faces,current_face)
 					current_face = {}
 					count = 0
 				end
@@ -140,7 +132,6 @@ function STL2PA.readSTL(stl_filename)
 			local x = bytes2float(fh:read(4))  -- normal vector
 			local y = bytes2float(fh:read(4))
 			local z = bytes2float(fh:read(4))
-			z0 = z
 			table.insert(current_face, {x,y,z})
 			local x = bytes2float(fh:read(4))  -- vertex 1
 			local y = bytes2float(fh:read(4))
@@ -155,9 +146,7 @@ function STL2PA.readSTL(stl_filename)
 			local z = bytes2float(fh:read(4))
 			table.insert(current_face, {x,y,z})
 			fh:read(2)  -- ignore attribute byte count
-			if z0 ~= 0 then  -- ignore vertical faces
-				table.insert(t_faces,current_face)
-			end
+			table.insert(t_faces,current_face)
 			current_face = {}
 		end
 		fh:close()
@@ -296,18 +285,17 @@ local function isInsideSTL(x,y,z, t_faces, xmin, xmax, ymin, ymax, zmin, zmax, t
 		local n1 = t_faces[l][1][1]
 		local n2 = t_faces[l][1][2]
 		local n3 = t_faces[l][1][3]
-		-- distance to plane
-		local w0_1 = x-v0_1
-		local w0_2 = y-v0_2
-		local w0_3 = z-v0_3
-		local a = -(n1*w0_1+n2*w0_2+n3*w0_3)
-		local r = a/n3
-		-- r = math.floor(r*1e6+0.5)/1e6
+		-- ray direction
+		local l1 = 1e-5
+		local l2 = 1e-5
+		local l3 = math.sqrt(1-2e-10)
+		-- distance to plane (https://en.wikipedia.org/wiki/Line%E2%80%93plane_intersection)
+		local r = (n1*(v0_1-x)+n2*(v0_2-y)+n3*(v0_3-z))/(l1*n1+l2*n2+l3*n3)
 		if (r>=0) then  -- ray goes towards triangle
 			-- intersect point of ray and plane
-			local I1 = x
-			local I2 = y
-			local I3 = z+r
+			local I1 = x+l1*r
+			local I2 = y+l2*r
+			local I3 = z+l3*r
 		 	local uu = (u1*u1 + u2*u2 + u3*u3)
 			local uv = (u1*v1 + u2*v2 + u3*v3)
 			local vv = (v1*v1 + v2*v2 + v3*v3)
@@ -319,8 +307,6 @@ local function isInsideSTL(x,y,z, t_faces, xmin, xmax, ymin, ymax, zmin, zmax, t
 			local D = uv*uv - uu*vv
 			local s = (uv*wv - vv*wu)/D
 			local t = (uv*wu - uu*wv)/D
-			-- s = math.floor(s*1e7+0.5)/1e7
-			-- t = math.floor(t*1e7+0.5)/1e7
 			-- I is inside or on edge or on corner of T  
 			if (s>=0 and s<=1 and t>=0 and (s+t)<=1) then
 				if (r==0) then
@@ -433,8 +419,6 @@ end
 function STL2PA.convert(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm, dy_mm, dz_mm, surface, boundingbox, symmetry)
 	local surfenhance = surface or "none"  -- surface enhancement
 	local bounding = boundingbox or ""  -- grounded bounding box
-	local tol = 1e-5  -- move grid by tol mm to test if point is inside STL
-	local tol2 = tol*1.01  -- move grid by tol mm to test if point is inside STL
 	local path,name = splitPath(stl_filename)
 	local start_time, end_time1, end_time2 = 0, 0, 0
 
@@ -472,12 +456,7 @@ function STL2PA.convert(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm,
 			local zmaxstl = t_size[6]
 			pa:fill { 
 				function(x,y,z)  -- in grid units
-					-- test if point is inside STL with different small offsets to catch edge cases
-					-- offset in +x+y, -x-y, -x+y and +x-y direction
-					if isInsideSTL(x+xmin+tol,y+ymin+tol2,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or 
-						isInsideSTL(x+xmin-tol,y+ymin-tol2,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or
-						isInsideSTL(x+xmin-tol,y+ymin+tol2,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or 
-						isInsideSTL(x+xmin+tol,y+ymin-tol2,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) then
+					if isInsideSTL(x+xmin,y+ymin,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) then
 						return potential, true
 					else
 						if i==1 then  -- do not overwrite other electrodes
@@ -509,12 +488,7 @@ function STL2PA.convert(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm,
 		local zmaxstl = t_size[6]
 		pa:fill { 
 			function(x,y,z)
-				-- test if point is inside STL with different small offsets to catch edge cases
-				-- offset in +x+y, -x-y, -x+y and +x-y direction
-				if isInsideSTL(x+xmin+tol,y+ymin+tol2,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or 
-					isInsideSTL(x+xmin-tol,y+ymin-tol2,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or
-					isInsideSTL(x+xmin-tol,y+ymin+tol2,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or 
-					isInsideSTL(x+xmin+tol,y+ymin-tol2,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) then
+				if isInsideSTL(x+xmin,y+ymin,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) then
 					return 1, true
 				else
 					return 0, false
@@ -536,8 +510,6 @@ end
 function STL2PA.modify(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, electrode_no, surface, boundingbox)
 	local surfenhance = surface or "none"  -- surface enhancement
 	local bounding = boundingbox or ""  -- grounded bounding box
-	local tol = 1e-5  -- move grid by tol mm to test if point is inside STL
-	local tol2 = tol*1.01  -- move grid by tol mm to test if point is inside STL
 	local path,name = splitPath(stl_filename)
 
 	writeHeader()
@@ -588,12 +560,7 @@ function STL2PA.modify(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, electro
 	local zmaxstl = t_size[6]
 	pa:fill { 
 		function(x,y,z)
-			-- test if point is inside STL with different small offsets to catch edge cases
-			-- offset in +x+y, -x-y, -x+y and +x-y direction
-			if isInsideSTL(x+xmin+tol,y+ymin+tol2,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or 
-				isInsideSTL(x+xmin-tol,y+ymin-tol2,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or
-				isInsideSTL(x+xmin-tol,y+ymin+tol2,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or 
-				isInsideSTL(x+xmin+tol,y+ymin-tol2,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) then
+			if isInsideSTL(x+xmin,y+ymin,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) then
 				return electrode_no, true
 			end
 		end, 

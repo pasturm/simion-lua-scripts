@@ -3,17 +3,18 @@ stl2palib2.lua
 
 Library to convert an electrode geometry from a STL file to a SIMION potential array file.
 
-The main advantages compared to the stl2pa command from SIMION SL Tools (< 8.2.0.11) are:
+The main advantages compared to the stl2pa command from SIMION SL Tools are:
 1. The STL surface is filled with solid points (avoids the solid points 
-   strategy issues of SL Tools).
+   strategy issues of SL Tools < 8.2.0.11).
 2. The electrode surface enhancement feature can be used (leads to higher 
    field accuracies).
-3. Array mirroring can be used.
-4. Bounding boxes can easily be added.
-5. Multiple electrodes can be generated from single STL file.
+3. Multiple electrodes can be generated from a single STL file.
+4. Array mirroring can be used.
+5. Bounding boxes can easily be added.
+6. Ideal and real wire grids can be added.
 
-Note: this might become somewhat obsolete in the future. SIMION 8.2.0.11-20210626 SL Tools
-contain similar functionality, but it is still buggy.
+Note: SIMION 8.2.0.11-20210626 SL Tools now contains similar functionality. But there are still bugs
+and it is slower than this lua script.
 
 Example:
 	-- load STL2PA library
@@ -65,7 +66,7 @@ Example:
 
 
 Patrick Sturm
-(c) 2021 TOFWERK
+(c) 2020-2022 TOFWERK
 --]]
 
 local STL2PA = {}
@@ -261,7 +262,7 @@ local function getUniqueElements(t_in)
 end
 
 -- check whether a grid point is inside the STL -------------------------------
--- from http://geomalgorithms.com/a06-_intersect-2.html
+-- adapted from http://geomalgorithms.com/a06-_intersect-2.html
 -- all points on STL surface are also considered to be inside
 local function isInsideSTL(x,y,z, t_faces, xmin, xmax, ymin, ymax, zmin, zmax, t_hash, dx_mm, dy_mm)
 	if (x<xmin or x>xmax or y<ymin or y>ymax or z<zmin or z>zmax) then -- outside of STL
@@ -293,18 +294,17 @@ local function isInsideSTL(x,y,z, t_faces, xmin, xmax, ymin, ymax, zmin, zmax, t
 		local n1 = t_faces[l][1][1]
 		local n2 = t_faces[l][1][2]
 		local n3 = t_faces[l][1][3]
-		-- distance to plane
-		local w0_1 = x-v0_1
-		local w0_2 = y-v0_2
-		local w0_3 = z-v0_3
-		local a = -(n1*w0_1+n2*w0_2+n3*w0_3)
-		local r = a/n3
-		-- r = math.floor(r*1e6+0.5)/1e6
+		-- ray direction
+		local l1 = 1e-5
+		local l2 = 1e-5
+		local l3 = math.sqrt(1-2e-10)
+		-- distance to plane (https://en.wikipedia.org/wiki/Line%E2%80%93plane_intersection)
+		local r = (n1*(v0_1-x)+n2*(v0_2-y)+n3*(v0_3-z))/(l1*n1+l2*n2+l3*n3)
 		if (r>=0) then  -- ray goes towards triangle
 			-- intersect point of ray and plane
-			local I1 = x
-			local I2 = y
-			local I3 = z+r
+			local I1 = x+l1*r
+			local I2 = y+l2*r
+			local I3 = z+l3*r
 		 	local uu = (u1*u1 + u2*u2 + u3*u3)
 			local uv = (u1*v1 + u2*v2 + u3*v3)
 			local vv = (v1*v1 + v2*v2 + v3*v3)
@@ -316,8 +316,6 @@ local function isInsideSTL(x,y,z, t_faces, xmin, xmax, ymin, ymax, zmin, zmax, t
 			local D = uv*uv - uu*vv
 			local s = (uv*wv - vv*wu)/D
 			local t = (uv*wu - uu*wv)/D
-			-- s = math.floor(s*1e7+0.5)/1e7
-			-- t = math.floor(t*1e7+0.5)/1e7
 			-- I is inside or on edge or on corner of T  
 			if (s>=0 and s<=1 and t>=0 and (s+t)<=1) then
 				if (r==0) then
@@ -621,8 +619,6 @@ function STL2PA.convert(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm,
 	surface, symmetry, electrodes)
 	local surfenhance = surface or "none"  -- surface enhancement
 	local e = electrodes or {0, {0,0,0}}
-	local tol = 1e-5  -- move grid by tol mm to test if point is inside STL
-	local tol2 = tol*1.01  -- move grid by tol mm to test if point is inside STL
 	local path,name = splitPath(stl_filename)
 	local start_time, end_time1, end_time2 = 0, 0, 0
 
@@ -671,12 +667,7 @@ function STL2PA.convert(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm,
 		local zmaxstl = t_size[6]
 		pa:fill { 
 			function(x,y,z)
-				-- test if point is inside STL with different small offsets to catch edge cases
-				-- offset in +x+y, -x-y, -x+y and +x-y direction
-				if isInsideSTL(x+xmin+tol,y+ymin+tol2,z+zmin, t_faces2, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or 
-					isInsideSTL(x+xmin-tol,y+ymin-tol2,z+zmin, t_faces2, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or
-					isInsideSTL(x+xmin-tol,y+ymin+tol2,z+zmin, t_faces2, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or 
-					isInsideSTL(x+xmin+tol,y+ymin-tol2,z+zmin, t_faces2, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) then
+				if isInsideSTL(x+xmin,y+ymin,z+zmin, t_faces2, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) then
 					return e[i][1], true
 				else
 					if i==1 then  -- do not overwrite other electrodes
@@ -699,8 +690,6 @@ end
 function STL2PA.modify(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, surface, electrodes)
 	local surfenhance = surface or "none"  -- surface enhancement
 	local e = electrodes or {0, {0,0,0}}
-	local tol = 1e-5  -- move grid by tol mm to test if point is inside STL
-	local tol2 = tol*1.01  -- move grid by tol mm to test if point is inside STL
 	local path,name = splitPath(stl_filename)
 	local start_time, end_time1, end_time2 = 0, 0, 0
 
@@ -749,10 +738,7 @@ function STL2PA.modify(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, surface
 			function(x,y,z)
 				-- test if point is inside STL with different small offsets to catch edge cases
 				-- offset in +x+y, -x-y, -x+y and +x-y direction
-				if isInsideSTL(x+xmin+tol,y+ymin+tol2,z+zmin, t_faces2, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or 
-					isInsideSTL(x+xmin-tol,y+ymin-tol2,z+zmin, t_faces2, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or
-					isInsideSTL(x+xmin-tol,y+ymin+tol2,z+zmin, t_faces2, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) or 
-					isInsideSTL(x+xmin+tol,y+ymin-tol2,z+zmin, t_faces2, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) then
+				if isInsideSTL(x+xmin,y+ymin,z+zmin, t_faces2, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) then
 					return e[i][1], true
 				end
 			end, 
