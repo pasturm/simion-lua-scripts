@@ -767,28 +767,128 @@ function STL2PA.modify(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, surface
 end
 
 
--- add ideal grid or wire grid in .pa# file -----------------------------------
-function STL2PA.addGrid(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm, 
-	dy_mm, dz_mm, pitch, direction, voltage)
+-- add ideal grid in .pa# file -----------------------------------
+function STL2PA.addIdealGrid(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, voltage)
 
 	local path,name = splitPath(stl_filename)
 	local file = path..name..".pa#"
-	local p = pitch or 0
-	local d = direction or "x"
 	local v = voltage or 0
 
-	io.write("Adding grid\n")
+	io.write("Adding ideal grid...\n")
 	io.flush()
 
 	simion.pas:close()  -- remove all PAs from RAM.
 	pa = simion.pas:open(file)  -- open pa# file
 
-	for xi=xmin/dx_mm, xmax/dy_mm do
-		for yi=ymin/dy_mm, ymax/dy_mm do
-			for zi=zmin/dz_mm, zmax/dz_mm do
-				pa:point(xi,yi,zi, v,true)
+	pa:fill { 
+		function(x,y,z)
+			if ((x>=xmin and x<=xmax) and (y>=ymin and y<=ymax) and (z>=zmin and z<=zmax)) then
+				return v, true
 			end
-		end
+		end, surface='none' 
+	}
+
+	pa:save(file)
+	simion.pas:close()  -- remove all PAs from RAM.
+end
+
+
+-- add real grid in .pa# file -----------------------------------
+function STL2PA.addRealGrid(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax,
+	voltage, pitch, radius, dir_wire, dir_plane)
+
+	local path,name = splitPath(stl_filename)
+	local file = path..name..".pa#"
+	local v = voltage or 0  -- electrode voltage
+	local p = pitch or 0  -- grid pitch (mm)
+	local r = radius or 0  -- wire radius (mm)
+	local dw = dir_wire or "z"  -- wire direction, "x" or "y" or "z" 
+	local dp = dir_plane or "y"  -- grid direction, orthogonal to wire direction
+
+	io.write("Adding real grid...\n")
+	io.flush()
+
+	simion.pas:close()  -- remove all PAs from RAM.
+	pa = simion.pas:open(file)  -- open pa# file
+
+	if dw == "x" and dp == "y" then
+		if zmin~=zmax then
+			print("WARNING: zmin~=zmax. zmin taken for grid plane.")
+		end 
+		pa:fill { 
+			function(x,y,z)
+				if ((x>=xmin and x<=xmax) and (y>=ymin and y<=ymax)) then
+					if (math.sqrt((z-zmin)^2 + (y%p)^2) < r or math.sqrt((z-zmin)^2 + (-y%p)^2) < r) then
+						return v, true
+					end
+				end
+			end, surface='fractional' 
+		}
+	elseif dw == "y" and dp == "x" then
+		if zmin~=zmax then
+			print("WARNING: zmin~=zmax. zmin taken for grid plane.")
+		end 
+		pa:fill { 
+			function(x,y,z)
+				if ((x>=xmin and x<=xmax) and (y>=ymin and y<=ymax)) then
+					if (math.sqrt((z-zmin)^2 + (x%p)^2) < r or math.sqrt((z-zmin)^2 + (-x%p)^2) < r) then
+						return v, true
+					end
+				end
+			end, surface='fractional' 
+		}
+	elseif dw == "z" and dp == "y" then
+		if xmin~=xmax then
+			print("WARNING: xmin~=xmax. xmin taken for grid plane.")
+		end 
+		pa:fill { 
+			function(x,y,z)
+				if ((y>=ymin and y<=ymax) and (z>=zmin and z<=zmax)) then
+					if (math.sqrt((x-xmin)^2 + (y%p)^2) < r or math.sqrt((x-xmin)^2 + (-y%p)^2) < r) then
+						return v, true
+					end
+				end
+			end, surface='fractional' 
+		}
+	elseif dw == "y" and dp == "z" then
+		if xmin~=xmax then
+			print("WARNING: xmin~=xmax. xmin taken for grid plane.")
+		end 
+		pa:fill { 
+			function(x,y,z)
+				if ((y>=ymin and y<=ymax) and (z>=zmin and z<=zmax)) then
+					if (math.sqrt((x-xmin)^2 + (z%p)^2) < r or math.sqrt((x-xmin)^2 + (-z%p)^2) < r) then
+						return v, true
+					end
+				end
+			end, surface='fractional' 
+		}
+	elseif dw == "x" and dp == "z" then
+		if ymin~=ymax then
+			print("WARNING: ymin~=ymax. ymin taken for grid plane.")
+		end 
+		pa:fill { 
+			function(x,y,z)
+				if ((x>=xmin and x<=xmax) and (z>=zmin and z<=zmax)) then
+					if (math.sqrt((y-ymin)^2 + (z%p)^2) < r or math.sqrt((y-ymin)^2 + (-z%p)^2) < r) then
+						return v, true
+					end
+				end
+			end, surface='fractional' 
+		}
+	elseif dw == "z" and dp == "x" then
+		if ymin~=ymax then
+			print("WARNING: ymin~=ymax. ymin taken for grid plane.")
+		end 
+		pa:fill { 
+			function(x,y,z)
+				if ((x>=xmin and x<=xmax) and (z>=zmin and z<=zmax)) then
+					if (math.sqrt((y-ymin)^2 + (x%p)^2) < r or math.sqrt((y-ymin)^2 + (-x%p)^2) < r) then
+						return v, true
+					end
+				end
+			end, surface='fractional' 
+		}
 	end
 
 	pa:save(file)
