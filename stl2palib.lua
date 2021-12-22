@@ -359,7 +359,7 @@ end
 local function writeHeader()
 	io.write("*********************************************\n")
 	io.write("STL2PA CONVERSION\n")
-	io.write("Copyright (c) 2021 TOFWERK\n")
+	io.write("Copyright (c) 2020-2022 TOFWERK\n")
 	io.write("Author: Patrick Sturm\n")
 	io.write("*********************************************\n\n")
 	io.flush()
@@ -480,10 +480,10 @@ function STL2PA.convert(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm,
 		io.write(" [Finished in "..string.format("%.3f", end_time1-start_time).." s]\n")
 		io.write("Building PA...\n")
 		io.flush()
-		local xminstl = max(math.floor(t_size[1]/dx_mm)*dx_mm, xmin)
-		local xmaxstl = min(math.ceil(t_size[2]/dx_mm)*dx_mm, xmax)
-		local yminstl = max(math.floor(t_size[3]/dy_mm)*dy_mm, ymin)
-		local ymaxstl = min(math.ceil(t_size[4]/dy_mm)*dy_mm, ymax)
+		local xminstl = math.max(math.floor(t_size[1]/dx_mm)*dx_mm, xmin)
+		local xmaxstl = math.min(math.floor(t_size[2]/dx_mm)*dx_mm, xmax)
+		local yminstl = math.max(math.floor(t_size[3]/dy_mm)*dy_mm, ymin)
+		local ymaxstl = math.min(math.floor(t_size[4]/dy_mm)*dy_mm, ymax)
 		local zminstl = t_size[5]
 		local zmaxstl = t_size[6]
 		pa:fill { 

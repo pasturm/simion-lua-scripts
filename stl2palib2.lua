@@ -112,7 +112,6 @@ end
 local function readSTL(stl_filename)
 	local t_faces = {}
 	local current_face = {}
-	local z0
 	if isascii(stl_filename) then
 		-- parse stl file (from http://lua-users.org/wiki/StlToObj)
 		local fh = io.open(stl_filename, "r")
@@ -201,11 +200,12 @@ end
 
 -- Check if two rectangles overlap (or touch each other) ----------------------
 local function doRectaglesOverlap(xmin1,xmax1,ymin1,ymax1,xmin2,xmax2,ymin2,ymax2)
+	local tol = 0.01  -- add some tolerance so no triangles are missed when ray is slightly tilted from z axis
 	-- if one rectangle is on left side of other 
-	if (xmin1 > xmax2 or xmin2 > xmax1) then
+	if (xmin1 > (xmax2+tol) or xmin2 > (xmax1+tol)) then
 	    return false
 	-- if one rectangle is above other 
-	elseif (ymin1 > ymax2 or ymin2 > ymax1) then
+	elseif (ymin1 > (ymax2+tol) or ymin2 > (ymax1+tol)) then
 	    return false
 	else
 		return true
@@ -346,7 +346,7 @@ end
 local function writeHeader()
 	io.write("*********************************************\n")
 	io.write("STL2PA CONVERSION\n")
-	io.write("Copyright (c) 2021 TOFWERK\n")
+	io.write("Copyright (c) 2020-2022 TOFWERK\n")
 	io.write("Author: Patrick Sturm\n")
 	io.write("*********************************************\n\n")
 	io.flush()
@@ -510,7 +510,7 @@ function STL2PA.removeElectrode(stl_filename, electrode_no)
 end
 
 
--- find closest triangle ------------------------------------------------------
+-- find closest triangle vertex ------------------------------------------------------
 local function find_closest_triangle(point, t_faces)
 	dist = math.huge
 	k = 0 
@@ -521,6 +521,9 @@ local function find_closest_triangle(point, t_faces)
 			local z = t_faces[i][j][3]
 			local d = (point[1]-x)^2 + (point[2]-y)^2 + (point[3]-z)^2
 			if (d<dist) then
+				-- if (d==0) then 
+				-- 	return i 
+				-- end
 				dist = d
 				k = i
 			end
@@ -642,27 +645,18 @@ function STL2PA.convert(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm,
 		local island = get_island(t_faces, ii)  -- indices of triangles belonging to group of ii-th triangle
 		local t_faces2 = {}
 		for j,v in pairs(island) do
-			-- We use a Z-ray intersection so we can ignore facets that
-			-- are purely vertically oriented (have zero Z-component).
-			if t_faces[v][1][3]~=0 then
-				table.insert(t_faces2, t_faces[v])
-			end
+			table.insert(t_faces2, t_faces[v])
 		end
 		local t_size = stlSize(t_faces2)
 		end_time1 = os.clock()
 		io.write(" ["..string.format("%.3f", end_time1-start_time).." s]\n")
-		io.write(i.."/"..#e.." Generating STL hash table... ")
-		io.flush()
-		start_time = os.clock()
 		local t_hash = map2Grid(t_faces2, t_size, dx_mm, dy_mm, xmin, xmax, ymin, ymax)
-		end_time1 = os.clock()
-		io.write(" ["..string.format("%.3f", end_time1-start_time).." s]\n")
 		io.write(i.."/"..#e.." Filling PA points... ")
 		io.flush()
-		local xminstl = max(math.floor(t_size[1]/dx_mm)*dx_mm, xmin)
-		local xmaxstl = min(math.ceil(t_size[2]/dx_mm)*dx_mm, xmax)
-		local yminstl = max(math.floor(t_size[3]/dy_mm)*dy_mm, ymin)
-		local ymaxstl = min(math.ceil(t_size[4]/dy_mm)*dy_mm, ymax)
+		local xminstl = math.max(math.floor(t_size[1]/dx_mm)*dx_mm, xmin)
+		local xmaxstl = math.min(math.floor(t_size[2]/dx_mm)*dx_mm, xmax)
+		local yminstl = math.max(math.floor(t_size[3]/dy_mm)*dy_mm, ymin)
+		local ymaxstl = math.min(math.floor(t_size[4]/dy_mm)*dy_mm, ymax)
 		local zminstl = t_size[5]
 		local zmaxstl = t_size[6]
 		pa:fill { 
@@ -728,16 +722,14 @@ function STL2PA.modify(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, surface
 		io.write(" [Finished in "..string.format("%.3f", end_time1-start_time).." s]\n")
 		io.write(i.."/"..#e.." Building PA... ")
 		io.flush()
-		local xminstl = max(math.floor(t_size[1]/dx_mm)*dx_mm, xmin)
-		local xmaxstl = min(math.ceil(t_size[2]/dx_mm)*dx_mm, xmax)
-		local yminstl = max(math.floor(t_size[3]/dy_mm)*dy_mm, ymin)
-		local ymaxstl = min(math.ceil(t_size[4]/dy_mm)*dy_mm, ymax)
+		local xminstl = math.max(math.floor(t_size[1]/dx_mm)*dx_mm, xmin)
+		local xmaxstl = math.min(math.floor(t_size[2]/dx_mm)*dx_mm, xmax)
+		local yminstl = math.max(math.floor(t_size[3]/dy_mm)*dy_mm, ymin)
+		local ymaxstl = math.min(math.floor(t_size[4]/dy_mm)*dy_mm, ymax)
 		local zminstl = t_size[5]
 		local zmaxstl = t_size[6]
 		pa:fill { 
 			function(x,y,z)
-				-- test if point is inside STL with different small offsets to catch edge cases
-				-- offset in +x+y, -x-y, -x+y and +x-y direction
 				if isInsideSTL(x+xmin,y+ymin,z+zmin, t_faces2, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) then
 					return e[i][1], true
 				end
