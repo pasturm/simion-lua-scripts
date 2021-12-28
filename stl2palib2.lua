@@ -246,7 +246,6 @@ local function map2Grid(t_faces, t_size, dx_mm, dy_mm, xmin, xmax, ymin, ymax)
 	return t_hash
 end
 
-local eps = 1e-10  -- floating point tolerance (machine epsilon is about 2e-16)
 
 -- Get the unique elements of a table -----------------------------------------
 -- https://stackoverflow.com/questions/20066835/lua-remove-duplicate-elements
@@ -254,7 +253,6 @@ local function getUniqueElements(t_in)
 	local hash = {}
 	local res = {}
 	for _,v in ipairs(t_in) do
-		v = math.floor(v/eps+0.5)*eps  -- account for floating point tolerance
 	   if (not hash[v]) then
 	       res[#res+1] = v
 	       hash[v] = true
@@ -302,7 +300,7 @@ local function isInsideSTL(x,y,z, t_faces, xmin, xmax, ymin, ymax, zmin, zmax, t
 		local l3 = math.sqrt(1-2e-10)
 		-- distance to plane (https://en.wikipedia.org/wiki/Line%E2%80%93plane_intersection)
 		local r = (n1*(v0_1-x)+n2*(v0_2-y)+n3*(v0_3-z))/(l1*n1+l2*n2+l3*n3)
-		if (r>=-eps) then  -- ray goes towards triangle
+		if (r>=0) then  -- ray goes towards triangle
 			-- intersect point of ray and plane
 			local I1 = x+l1*r
 			local I2 = y+l2*r
@@ -319,8 +317,8 @@ local function isInsideSTL(x,y,z, t_faces, xmin, xmax, ymin, ymax, zmin, zmax, t
 			local s = (uv*wv - vv*wu)/D
 			local t = (uv*wu - uu*wv)/D
 			-- I is inside or on edge or on corner of T
-			if (s>=-eps and s<=1+eps and t>=-eps and (s+t)<=1+eps) then
-				if (math.abs(r)<eps) then
+			if (s>=0 and s<=1 and t>=0 and (s+t)<=1) then
+				if (r==0) then
 					return true
 				end
 				table.insert(r_array, r)
@@ -574,6 +572,7 @@ local function get_neighbours(t_faces)
 	local t_neighbour = {}
 	for i=1,#t_faces do
 		t_neighbour[i] = {}
+		table.insert(t_neighbour[i], i)  -- add i-th triangle
 		local lookup = {}
 		for j=1,3 do
 			local test_vertex = vertices[3*(i-1)+j][1]  -- loop through all vertices
@@ -638,7 +637,7 @@ function STL2PA.convert(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm,
 	pa.symmetry = symmetry or "3dplanar"
 
 	local t_faces = readSTL(stl_filename)
-	
+
 	for i=1,#e do
 		io.write(i.."/"..#e.." Finding connected STL surfaces... ")
 		io.flush()
