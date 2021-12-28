@@ -39,9 +39,6 @@ Example:
 	-- surface enhancement
 	local surface = "fractional"
 
-	-- bounding box
-	local boundingbox = "-x+x-y+y-z+z"
-
 	-- array symmetry and mirroring
 	local symmetry = "3dplanar[yz]"
 
@@ -52,18 +49,17 @@ Example:
 	 	{2, {0,-75,-66}}
 	}
 
-	-- direction for ray intersection testing
-	local direction = "z"
-
 	-- run stl2pa conversion
 	STL2PA.convert(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm, dy_mm, dz_mm, 
-						surface, symmetry, electrodes, direction)
+						surface, symmetry, electrodes, "z")
 
 	-- modify or add one electrode in .pa#
 	-- STL2PA.modify(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, surface, electrodes)
 
 	-- add bounding box in .pa# file
-	-- STL2PA.boundingBox(stl_filename, boundingbox, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm, dy_mm, dz_mm)
+	-- local boundingbox = "-x+x-y+y-z+z"
+	-- local add = true  -- false to remove bounding
+	-- STL2PA.boundingBox(stl_filename, boundingbox, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm, dy_mm, dz_mm, add)
 
 	-- remove an electrode from .pa#
 	-- removeElectrode(stl_filename, electrode_no)
@@ -396,7 +392,7 @@ end
 
 -- write header ---------------------------------------------------------------
 local function writeHeader()
-	io.write("*********************************************\n")
+	io.write("\n*********************************************\n")
 	io.write("STL2PA CONVERSION\n")
 	io.write("Copyright (c) 2020-2022 TOFWERK\n")
 	io.write("Author: Patrick Sturm\n")
@@ -405,11 +401,12 @@ local function writeHeader()
 end
 
 
--- add bounding box in .pa# file -----------------------------------
-function STL2PA.addBoundingBox(stl_filename, bounding, xmin, xmax, ymin, ymax, 
-									 zmin, zmax, dx_mm, dy_mm, dz_mm)
+-- add (or remove) bounding box in .pa# file -----------------------------------
+function STL2PA.boundingBox(stl_filename, bounding, xmin, xmax, ymin, ymax, 
+									 zmin, zmax, dx_mm, dy_mm, dz_mm, add)
 	local path,name = splitPath(stl_filename)
 	local file = path..name..".pa#"
+	local adding = add or true
 
 	io.write("Adding bounding box "..bounding.."\n")
 	io.flush()
@@ -420,7 +417,7 @@ function STL2PA.addBoundingBox(stl_filename, bounding, xmin, xmax, ymin, ymax,
 	if (string.match(bounding, "%-x")) then
 		for yi=0,(ymax-ymin)/dy_mm do
 			for zi=0,(zmax-zmin)/dz_mm do
-				pa:point(0,yi,zi, 0,true)
+				pa:point(0,yi,zi, 0,adding)
 			end
 		end
 	end
@@ -429,7 +426,7 @@ function STL2PA.addBoundingBox(stl_filename, bounding, xmin, xmax, ymin, ymax,
 	if (string.match(bounding, "%+x")) then
 		for yi=0,(ymax-ymin)/dy_mm do
 			for zi=0,(zmax-zmin)/dz_mm do
-				pa:point(ximax,yi,zi, 0,true)
+				pa:point(ximax,yi,zi, 0,adding)
 			end
 		end
 	end
@@ -437,7 +434,7 @@ function STL2PA.addBoundingBox(stl_filename, bounding, xmin, xmax, ymin, ymax,
 	if (string.match(bounding, "%-y")) then
 		for xi=0,(xmax-xmin)/dx_mm do
 			for zi=0,(zmax-zmin)/dz_mm do
-				pa:point(xi,0,zi, 0,true)
+				pa:point(xi,0,zi, 0,adding)
 			end
 		end
 	end
@@ -446,7 +443,7 @@ function STL2PA.addBoundingBox(stl_filename, bounding, xmin, xmax, ymin, ymax,
 	if (string.match(bounding, "%+y")) then
 		for xi=0,(xmax-xmin)/dx_mm do
 			for zi=0,(zmax-zmin)/dz_mm do
-				pa:point(xi,yimax,zi, 0,true)
+				pa:point(xi,yimax,zi, 0,adding)
 			end
 		end
 	end
@@ -454,7 +451,7 @@ function STL2PA.addBoundingBox(stl_filename, bounding, xmin, xmax, ymin, ymax,
 	if (string.match(bounding, "%-z")) then
 		for xi=0,(xmax-xmin)/dx_mm do
 			for yi=0,(ymax-ymin)/dy_mm do
-				pa:point(xi,yi,0, 0,true)
+				pa:point(xi,yi,0, 0,adding)
 			end
 		end
 	end
@@ -463,75 +460,7 @@ function STL2PA.addBoundingBox(stl_filename, bounding, xmin, xmax, ymin, ymax,
 	if (string.match(bounding, "%+z")) then
 		for xi=0,(xmax-xmin)/dx_mm do
 			for yi=0,(ymax-ymin)/dy_mm do
-				pa:point(xi,yi,zimax, 0,true)
-			end
-		end
-	end
-
-	pa:save(file)
-	simion.pas:close()  -- remove all PAs from RAM.
-end
-
-
--- remove bounding box in .pa# file -----------------------------------
-function STL2PA.removeBoundingBox(stl_filename, bounding, xmin, xmax, ymin, ymax, 
-									 zmin, zmax, dx_mm, dy_mm, dz_mm)
-	local path,name = splitPath(stl_filename)
-	local file = path..name..".pa#"
-
-	io.write("Removing bounding box "..bounding.."\n")
-	io.flush()
-
-	simion.pas:close()  -- remove all PAs from RAM.
-	pa = simion.pas:open(file)  -- open pa# file
-
-	if (string.match(bounding, "%-x")) then
-		for yi=0,(ymax-ymin)/dy_mm do
-			for zi=0,(zmax-zmin)/dz_mm do
-				pa:point(0,yi,zi, 0,false)
-			end
-		end
-	end
-
-	local ximax = (xmax-xmin)/dx_mm
-	if (string.match(bounding, "%+x")) then
-		for yi=0,(ymax-ymin)/dy_mm do
-			for zi=0,(zmax-zmin)/dz_mm do
-				pa:point(ximax,yi,zi, 0,false)
-			end
-		end
-	end
-
-	if (string.match(bounding, "%-y")) then
-		for xi=0,(xmax-xmin)/dx_mm do
-			for zi=0,(zmax-zmin)/dz_mm do
-				pa:point(xi,0,zi, 0,false)
-			end
-		end
-	end
-
-	local yimax = (ymax-ymin)/dy_mm
-	if (string.match(bounding, "%+y")) then
-		for xi=0,(xmax-xmin)/dx_mm do
-			for zi=0,(zmax-zmin)/dz_mm do
-				pa:point(xi,yimax,zi, 0,false)
-			end
-		end
-	end
-
-	if (string.match(bounding, "%-z")) then
-		for xi=0,(xmax-xmin)/dx_mm do
-			for yi=0,(ymax-ymin)/dy_mm do
-				pa:point(xi,yi,0, 0,false)
-			end
-		end
-	end
-
-	local zimax = (zmax-zmin)/dz_mm
-	if (string.match(bounding, "%+z")) then
-		for xi=0,(xmax-xmin)/dx_mm do
-			for yi=0,(ymax-ymin)/dy_mm do
-				pa:point(xi,yi,zimax, 0,false)
+				pa:point(xi,yi,zimax, 0,adding)
 			end
 		end
 	end
