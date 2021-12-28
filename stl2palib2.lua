@@ -52,8 +52,12 @@ Example:
 	 	{2, {0,-75,-66}}
 	}
 
+	-- direction for ray intersection testing
+	local direction = "z"
+
 	-- run stl2pa conversion
-	STL2PA.convert(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm, dy_mm, dz_mm, surface, symmetry, electrodes)
+	STL2PA.convert(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm, dy_mm, dz_mm, 
+						surface, symmetry, electrodes, direction)
 
 	-- modify or add one electrode in .pa#
 	-- STL2PA.modify(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, surface, electrodes)
@@ -165,14 +169,32 @@ end
 
 -- Calculate Axis Aligned Bounding Boxes of the triangles ---------------------
 -- Note: only 2D projection is needed.
-local function boundingBoxes(t_faces)
+local function boundingBoxes(t_faces, direction)
 	local t_bb = {}
-	for _,v in ipairs(t_faces) do
-		local min_x = math.min(v[2][1], v[3][1], v[4][1])
-		local max_x = math.max(v[2][1], v[3][1], v[4][1])
-		local min_y = math.min(v[2][2], v[3][2], v[4][2])
-		local max_y = math.max(v[2][2], v[3][2], v[4][2])
-		table.insert(t_bb, {min_x,max_x,min_y,max_y})
+	if (direction=="z") then
+		for _,v in ipairs(t_faces) do
+			local min_x = math.min(v[2][1], v[3][1], v[4][1])
+			local max_x = math.max(v[2][1], v[3][1], v[4][1])
+			local min_y = math.min(v[2][2], v[3][2], v[4][2])
+			local max_y = math.max(v[2][2], v[3][2], v[4][2])
+			table.insert(t_bb, {min_x,max_x,min_y,max_y})
+		end
+	elseif (direction=="y") then
+		for _,v in ipairs(t_faces) do
+			local min_x = math.min(v[2][1], v[3][1], v[4][1])
+			local max_x = math.max(v[2][1], v[3][1], v[4][1])
+			local min_y = math.min(v[2][3], v[3][3], v[4][3])
+			local max_y = math.max(v[2][3], v[3][3], v[4][3])
+			table.insert(t_bb, {min_x,max_x,min_y,max_y})
+		end
+	elseif (direction=="x") then
+		for _,v in ipairs(t_faces) do
+			local min_x = math.min(v[2][3], v[3][3], v[4][3])
+			local max_x = math.max(v[2][3], v[3][3], v[4][3])
+			local min_y = math.min(v[2][2], v[3][2], v[4][2])
+			local max_y = math.max(v[2][2], v[3][2], v[4][2])
+			table.insert(t_bb, {min_x,max_x,min_y,max_y})
+		end
 	end
 	return t_bb
 end
@@ -218,13 +240,26 @@ end
 -- the grid point indices and the third dimension is a vector
 -- where the n-th element is 0 if the n-th bounding box is inside the grid cell
 -- and nil if it is completely outside. 
-local function map2Grid(t_faces, t_size, dx_mm, dy_mm, xmin, xmax, ymin, ymax)
-	local x_min = math.max(math.floor(t_size[1]/dx_mm)*dx_mm, xmin)
-	local x_max = math.min(math.floor(t_size[2]/dx_mm)*dx_mm, xmax)
-	local y_min = math.max(math.floor(t_size[3]/dy_mm)*dy_mm, ymin)
-	local y_max = math.min(math.floor(t_size[4]/dy_mm)*dy_mm, ymax)
-	local t_bb = boundingBoxes(t_faces)
+local function map2Grid(t_faces, t_size, dx_mm, dy_mm, xmin, xmax, ymin, ymax, direction)
+	local t_bb = boundingBoxes(t_faces, direction)
 	local t_hash = {}
+	local x_min, x_max, y_min, y_max
+	if (direction=="z") then
+		x_min = math.max(math.floor(t_size[1]/dx_mm)*dx_mm, xmin)
+		x_max = math.min(math.floor(t_size[2]/dx_mm)*dx_mm, xmax)
+		y_min = math.max(math.floor(t_size[3]/dy_mm)*dy_mm, ymin)
+		y_max = math.min(math.floor(t_size[4]/dy_mm)*dy_mm, ymax)
+	elseif (direction=="y") then
+		x_min = math.max(math.floor(t_size[1]/dx_mm)*dx_mm, xmin)
+		x_max = math.min(math.floor(t_size[2]/dx_mm)*dx_mm, xmax)
+		y_min = math.max(math.floor(t_size[5]/dy_mm)*dy_mm, ymin)
+		y_max = math.min(math.floor(t_size[6]/dy_mm)*dy_mm, ymax)
+	elseif (direction=="x") then
+		x_min = math.max(math.floor(t_size[5]/dx_mm)*dx_mm, xmin)
+		x_max = math.min(math.floor(t_size[6]/dx_mm)*dx_mm, xmax)
+		y_min = math.max(math.floor(t_size[3]/dy_mm)*dy_mm, ymin)
+		y_max = math.min(math.floor(t_size[4]/dy_mm)*dy_mm, ymax)
+	end
 	for i=1,(x_max-x_min)/dx_mm+1 do  -- loop over x axis
 		t_hash[i] = {}
 		-- convert the grid point indices to min and max
@@ -264,12 +299,33 @@ end
 -- check whether a grid point is inside the STL -------------------------------
 -- adapted from http://geomalgorithms.com/a06-_intersect-2.html
 -- all points on STL surface are also considered to be inside
-local function isInsideSTL(x,y,z, t_faces, xmin, xmax, ymin, ymax, zmin, zmax, t_hash, dx_mm, dy_mm)
+local function isInsideSTL(x,y,z, t_faces, xmin, xmax, ymin, ymax, zmin, zmax, t_hash, dx_mm, dy_mm, dz_mm, direction)
 	if (x<xmin or x>xmax or y<ymin or y>ymax or z<zmin or z>zmax) then -- outside of STL
 		return false
 	end
-	local i = math.floor((x-xmin)/dx_mm) + 1  -- hash table grid index
-	local j = math.floor((y-ymin)/dy_mm) + 1
+	local i, j, l1, l2, l3
+	if (direction=="z") then
+		i = math.floor((x-xmin)/dx_mm) + 1  -- hash table grid index
+		j = math.floor((y-ymin)/dy_mm) + 1
+		-- ray direction
+		l1 = 1e-5
+		l2 = 1e-5
+		l3 = math.sqrt(1-2e-10)
+	elseif (direction=="y") then
+		i = math.floor((x-xmin)/dx_mm) + 1  -- hash table grid index
+		j = math.floor((z-zmin)/dz_mm) + 1
+		-- ray direction
+		l1 = 1e-5
+		l2 = math.sqrt(1-2e-10)
+		l3 = 1e-5
+	elseif (direction=="x") then
+		i = math.floor((z-zmin)/dz_mm) + 1  -- hash table grid index
+		j = math.floor((y-ymin)/dy_mm) + 1
+		-- ray direction
+		l1 = math.sqrt(1-2e-10)
+		l2 = 1e-5
+		l3 = 1e-5
+	end
 	local r_array = {}  -- use this to check whether ray hits edge of two connected triangles
 	for l,_ in pairs(t_hash[i][j]) do  -- loop through all relevant triangles
 		-- Note: ipairs does not work here, it stops at the first nil -> use pairs 
@@ -294,10 +350,6 @@ local function isInsideSTL(x,y,z, t_faces, xmin, xmax, ymin, ymax, zmin, zmax, t
 		local n1 = t_faces[l][1][1]
 		local n2 = t_faces[l][1][2]
 		local n3 = t_faces[l][1][3]
-		-- ray direction
-		local l1 = 1e-5
-		local l2 = 1e-5
-		local l3 = math.sqrt(1-2e-10)
 		-- distance to plane (https://en.wikipedia.org/wiki/Line%E2%80%93plane_intersection)
 		local r = (n1*(v0_1-x)+n2*(v0_2-y)+n3*(v0_3-z))/(l1*n1+l2*n2+l3*n3)
 		if (r>=0) then  -- ray goes towards triangle
@@ -620,11 +672,12 @@ end
 -- STL to PA conversion -------------------------------------------------------
 -- conversion of all connected triangle that are closest to point
 function STL2PA.convert(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm, dy_mm, dz_mm, 
-	surface, symmetry, electrodes)
+	surface, symmetry, electrodes, direction)
 	local surfenhance = surface or "none"  -- surface enhancement
 	local e = electrodes or {0, {0,0,0}}
 	local path,name = splitPath(stl_filename)
 	local start_time, end_time1, end_time2 = 0, 0, 0
+	local dir = direction or "z"
 
 	writeHeader()
 
@@ -651,18 +704,37 @@ function STL2PA.convert(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm,
 		local t_size = stlSize(t_faces2)
 		end_time1 = os.clock()
 		io.write(" ["..string.format("%.3f", end_time1-start_time).." s]\n")
-		local t_hash = map2Grid(t_faces2, t_size, dx_mm, dy_mm, xmin, xmax, ymin, ymax)
 		io.write(i.."/"..#e.." Filling PA points... ")
 		io.flush()
-		local xminstl = math.max(math.floor(t_size[1]/dx_mm)*dx_mm, xmin)
-		local xmaxstl = math.min(math.floor(t_size[2]/dx_mm)*dx_mm, xmax)
-		local yminstl = math.max(math.floor(t_size[3]/dy_mm)*dy_mm, ymin)
-		local ymaxstl = math.min(math.floor(t_size[4]/dy_mm)*dy_mm, ymax)
-		local zminstl = t_size[5]
-		local zmaxstl = t_size[6]
+		local t_hash, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl
+		if (dir=="z") then
+			t_hash = map2Grid(t_faces2, t_size, dx_mm, dy_mm, xmin, xmax, ymin, ymax, dir)
+			xminstl = math.max(math.floor(t_size[1]/dx_mm)*dx_mm, xmin)
+			xmaxstl = math.min(math.floor(t_size[2]/dx_mm)*dx_mm, xmax)
+			yminstl = math.max(math.floor(t_size[3]/dy_mm)*dy_mm, ymin)
+			ymaxstl = math.min(math.floor(t_size[4]/dy_mm)*dy_mm, ymax)
+			zminstl = t_size[5]
+			zmaxstl = t_size[6]
+		elseif (dir=="y") then
+			t_hash = map2Grid(t_faces2, t_size, dx_mm, dz_mm, xmin, xmax, zmin, zmax, dir)
+			xminstl = math.max(math.floor(t_size[1]/dx_mm)*dx_mm, xmin)
+			xmaxstl = math.min(math.floor(t_size[2]/dx_mm)*dx_mm, xmax)
+			yminstl = t_size[3]
+			ymaxstl = t_size[4]
+			zminstl = math.max(math.floor(t_size[5]/dz_mm)*dz_mm, zmin)
+			zmaxstl = math.min(math.floor(t_size[6]/dz_mm)*dz_mm, zmax)
+		elseif (dir=="x") then
+			t_hash = map2Grid(t_faces2, t_size, dz_mm, dy_mm, zmin, zmax, ymin, ymax, dir)
+			xminstl = t_size[1]
+			xmaxstl = t_size[2]
+			yminstl = math.max(math.floor(t_size[3]/dy_mm)*dy_mm, ymin)
+			ymaxstl = math.min(math.floor(t_size[4]/dy_mm)*dy_mm, ymax)
+			zminstl = math.max(math.floor(t_size[5]/dz_mm)*dz_mm, zmin)
+			zmaxstl = math.min(math.floor(t_size[6]/dz_mm)*dz_mm, zmax)
+		end
 		pa:fill { 
 			function(x,y,z)
-				if isInsideSTL(x+xmin,y+ymin,z+zmin, t_faces2, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) then
+				if isInsideSTL(x+xmin,y+ymin,z+zmin, t_faces2, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm, dz_mm, dir) then
 					return e[i][1], true
 				else
 					if i==1 then  -- do not overwrite other electrodes
@@ -718,7 +790,7 @@ function STL2PA.modify(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, surface
 		io.write(i.."/"..#e.." Generating STL hash table... ")
 		io.flush()
 		start_time = os.clock()
-		local t_hash = map2Grid(t_faces2, t_size, dx_mm, dy_mm, xmin, xmax, ymin, ymax)
+		local t_hash = map2Grid(t_faces2, t_size, dx_mm, dy_mm, xmin, xmax, ymin, ymax, "z")
 		end_time1 = os.clock()
 		io.write(" [Finished in "..string.format("%.3f", end_time1-start_time).." s]\n")
 		io.write(i.."/"..#e.." Building PA... ")
@@ -731,7 +803,7 @@ function STL2PA.modify(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, surface
 		local zmaxstl = t_size[6]
 		pa:fill { 
 			function(x,y,z)
-				if isInsideSTL(x+xmin,y+ymin,z+zmin, t_faces2, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) then
+				if isInsideSTL(x+xmin,y+ymin,z+zmin, t_faces2, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm, "z") then
 					return e[i][1], true
 				end
 			end, 
