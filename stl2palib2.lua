@@ -242,19 +242,19 @@ local function map2Grid(t_faces, t_size, dx_mm, dy_mm, xmin, xmax, ymin, ymax, d
 	local x_min, x_max, y_min, y_max
 	if (direction=="z") then
 		x_min = math.max(math.floor(t_size[1]/dx_mm)*dx_mm, xmin)
-		x_max = math.min(math.floor(t_size[2]/dx_mm)*dx_mm, xmax)
+		x_max = math.min(math.ceil(t_size[2]/dx_mm)*dx_mm, xmax)
 		y_min = math.max(math.floor(t_size[3]/dy_mm)*dy_mm, ymin)
-		y_max = math.min(math.floor(t_size[4]/dy_mm)*dy_mm, ymax)
+		y_max = math.min(math.ceil(t_size[4]/dy_mm)*dy_mm, ymax)
 	elseif (direction=="y") then
 		x_min = math.max(math.floor(t_size[1]/dx_mm)*dx_mm, xmin)
-		x_max = math.min(math.floor(t_size[2]/dx_mm)*dx_mm, xmax)
+		x_max = math.min(math.ceil(t_size[2]/dx_mm)*dx_mm, xmax)
 		y_min = math.max(math.floor(t_size[5]/dy_mm)*dy_mm, ymin)
-		y_max = math.min(math.floor(t_size[6]/dy_mm)*dy_mm, ymax)
+		y_max = math.min(math.ceil(t_size[6]/dy_mm)*dy_mm, ymax)
 	elseif (direction=="x") then
 		x_min = math.max(math.floor(t_size[5]/dx_mm)*dx_mm, xmin)
-		x_max = math.min(math.floor(t_size[6]/dx_mm)*dx_mm, xmax)
+		x_max = math.min(math.ceil(t_size[6]/dx_mm)*dx_mm, xmax)
 		y_min = math.max(math.floor(t_size[3]/dy_mm)*dy_mm, ymin)
-		y_max = math.min(math.floor(t_size[4]/dy_mm)*dy_mm, ymax)
+		y_max = math.min(math.ceil(t_size[4]/dy_mm)*dy_mm, ymax)
 	end
 	for i=1,(x_max-x_min)/dx_mm+1 do  -- loop over x axis
 		t_hash[i] = {}
@@ -639,27 +639,27 @@ function STL2PA.convert(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm,
 		if (dir=="z") then
 			t_hash = map2Grid(t_faces2, t_size, dx_mm, dy_mm, xmin, xmax, ymin, ymax, dir)
 			xminstl = math.max(math.floor(t_size[1]/dx_mm)*dx_mm, xmin)
-			xmaxstl = math.min(math.floor(t_size[2]/dx_mm)*dx_mm, xmax)
+			xmaxstl = math.min(math.ceil(t_size[2]/dx_mm)*dx_mm, xmax)
 			yminstl = math.max(math.floor(t_size[3]/dy_mm)*dy_mm, ymin)
-			ymaxstl = math.min(math.floor(t_size[4]/dy_mm)*dy_mm, ymax)
+			ymaxstl = math.min(math.ceil(t_size[4]/dy_mm)*dy_mm, ymax)
 			zminstl = t_size[5]
 			zmaxstl = t_size[6]
 		elseif (dir=="y") then
 			t_hash = map2Grid(t_faces2, t_size, dx_mm, dz_mm, xmin, xmax, zmin, zmax, dir)
 			xminstl = math.max(math.floor(t_size[1]/dx_mm)*dx_mm, xmin)
-			xmaxstl = math.min(math.floor(t_size[2]/dx_mm)*dx_mm, xmax)
+			xmaxstl = math.min(math.ceil(t_size[2]/dx_mm)*dx_mm, xmax)
 			yminstl = t_size[3]
 			ymaxstl = t_size[4]
 			zminstl = math.max(math.floor(t_size[5]/dz_mm)*dz_mm, zmin)
-			zmaxstl = math.min(math.floor(t_size[6]/dz_mm)*dz_mm, zmax)
+			zmaxstl = math.min(math.ceil(t_size[6]/dz_mm)*dz_mm, zmax)
 		elseif (dir=="x") then
 			t_hash = map2Grid(t_faces2, t_size, dz_mm, dy_mm, zmin, zmax, ymin, ymax, dir)
 			xminstl = t_size[1]
 			xmaxstl = t_size[2]
 			yminstl = math.max(math.floor(t_size[3]/dy_mm)*dy_mm, ymin)
-			ymaxstl = math.min(math.floor(t_size[4]/dy_mm)*dy_mm, ymax)
+			ymaxstl = math.min(math.ceil(t_size[4]/dy_mm)*dy_mm, ymax)
 			zminstl = math.max(math.floor(t_size[5]/dz_mm)*dz_mm, zmin)
-			zmaxstl = math.min(math.floor(t_size[6]/dz_mm)*dz_mm, zmax)
+			zmaxstl = math.min(math.ceil(t_size[6]/dz_mm)*dz_mm, zmax)
 		end
 		pa:fill { 
 			function(x,y,z)
@@ -725,9 +725,9 @@ function STL2PA.modify(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, surface
 		io.write(i.."/"..#e.." Building PA... ")
 		io.flush()
 		local xminstl = math.max(math.floor(t_size[1]/dx_mm)*dx_mm, xmin)
-		local xmaxstl = math.min(math.floor(t_size[2]/dx_mm)*dx_mm, xmax)
+		local xmaxstl = math.min(math.ceil(t_size[2]/dx_mm)*dx_mm, xmax)
 		local yminstl = math.max(math.floor(t_size[3]/dy_mm)*dy_mm, ymin)
-		local ymaxstl = math.min(math.floor(t_size[4]/dy_mm)*dy_mm, ymax)
+		local ymaxstl = math.min(math.ceil(t_size[4]/dy_mm)*dy_mm, ymax)
 		local zminstl = t_size[5]
 		local zmaxstl = t_size[6]
 		pa:fill { 
