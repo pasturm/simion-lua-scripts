@@ -211,9 +211,9 @@ end
 -- and nil if it is completely outside. 
 local function map2Grid(t_faces, t_size, dx_mm, dy_mm, xmin, xmax, ymin, ymax)
 	local x_min = math.max(math.floor(t_size[1]/dx_mm)*dx_mm, xmin)
-	local x_max = math.min(math.floor(t_size[2]/dx_mm)*dx_mm, xmax)
+	local x_max = math.min(math.ceil(t_size[2]/dx_mm)*dx_mm, xmax)
 	local y_min = math.max(math.floor(t_size[3]/dy_mm)*dy_mm, ymin)
-	local y_max = math.min(math.floor(t_size[4]/dy_mm)*dy_mm, ymax)
+	local y_max = math.min(math.ceil(t_size[4]/dy_mm)*dy_mm, ymax)
 	local t_bb = boundingBoxes(t_faces)
 	local t_hash = {}
 	for i=1,(x_max-x_min)/dx_mm+1 do  -- loop over x axis
@@ -481,9 +481,9 @@ function STL2PA.convert(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm,
 		io.write("Building PA...\n")
 		io.flush()
 		local xminstl = math.max(math.floor(t_size[1]/dx_mm)*dx_mm, xmin)
-		local xmaxstl = math.min(math.floor(t_size[2]/dx_mm)*dx_mm, xmax)
+		local xmaxstl = math.min(math.ceil(t_size[2]/dx_mm)*dx_mm, xmax)
 		local yminstl = math.max(math.floor(t_size[3]/dy_mm)*dy_mm, ymin)
-		local ymaxstl = math.min(math.floor(t_size[4]/dy_mm)*dy_mm, ymax)
+		local ymaxstl = math.min(math.ceil(t_size[4]/dy_mm)*dy_mm, ymax)
 		local zminstl = t_size[5]
 		local zmaxstl = t_size[6]
 		pa:fill { 
