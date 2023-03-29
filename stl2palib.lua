@@ -357,7 +357,7 @@ end
 
 -- write header ---------------------------------------------------------------
 local function writeHeader()
-	io.write("*********************************************\n")
+	io.write("\n*********************************************\n")
 	io.write("STL2PA CONVERSION\n")
 	io.write("Copyright (c) 2020-2022 TOFWERK\n")
 	io.write("Author: Patrick Sturm\n")

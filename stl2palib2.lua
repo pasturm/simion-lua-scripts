@@ -403,12 +403,19 @@ end
 
 -- add (or remove) bounding box in .pa# file -----------------------------------
 function STL2PA.boundingBox(stl_filename, bounding, xmin, xmax, ymin, ymax, 
-									 zmin, zmax, dx_mm, dy_mm, dz_mm, add)
+									 zmin, zmax, dx_mm, dy_mm, dz_mm, add, voltage)
 	local path,name = splitPath(stl_filename)
 	local file = path..name..".pa#"
 	local adding = add or true
+	local v = voltage or 0
 
-	io.write("Adding bounding box "..bounding.."\n")
+	if not adding then v = 0 end
+
+	if adding then
+		io.write("Adding bounding box "..bounding.."\n")
+	else
+		io.write("Removing bounding box "..bounding.."\n")
+	end
 	io.flush()
 
 	simion.pas:close()  -- remove all PAs from RAM.
@@ -417,7 +424,7 @@ function STL2PA.boundingBox(stl_filename, bounding, xmin, xmax, ymin, ymax,
 	if (string.match(bounding, "%-x")) then
 		for yi=0,(ymax-ymin)/dy_mm do
 			for zi=0,(zmax-zmin)/dz_mm do
-				pa:point(0,yi,zi, 0,adding)
+				pa:point(0,yi,zi, v,adding)
 			end
 		end
 	end
@@ -426,7 +433,7 @@ function STL2PA.boundingBox(stl_filename, bounding, xmin, xmax, ymin, ymax,
 	if (string.match(bounding, "%+x")) then
 		for yi=0,(ymax-ymin)/dy_mm do
 			for zi=0,(zmax-zmin)/dz_mm do
-				pa:point(ximax,yi,zi, 0,adding)
+				pa:point(ximax,yi,zi, v,adding)
 			end
 		end
 	end
@@ -434,7 +441,7 @@ function STL2PA.boundingBox(stl_filename, bounding, xmin, xmax, ymin, ymax,
 	if (string.match(bounding, "%-y")) then
 		for xi=0,(xmax-xmin)/dx_mm do
 			for zi=0,(zmax-zmin)/dz_mm do
-				pa:point(xi,0,zi, 0,adding)
+				pa:point(xi,0,zi, v,adding)
 			end
 		end
 	end
@@ -443,7 +450,7 @@ function STL2PA.boundingBox(stl_filename, bounding, xmin, xmax, ymin, ymax,
 	if (string.match(bounding, "%+y")) then
 		for xi=0,(xmax-xmin)/dx_mm do
 			for zi=0,(zmax-zmin)/dz_mm do
-				pa:point(xi,yimax,zi, 0,adding)
+				pa:point(xi,yimax,zi, v,adding)
 			end
 		end
 	end
@@ -451,7 +458,7 @@ function STL2PA.boundingBox(stl_filename, bounding, xmin, xmax, ymin, ymax,
 	if (string.match(bounding, "%-z")) then
 		for xi=0,(xmax-xmin)/dx_mm do
 			for yi=0,(ymax-ymin)/dy_mm do
-				pa:point(xi,yi,0, 0,adding)
+				pa:point(xi,yi,0, v,adding)
 			end
 		end
 	end
@@ -460,7 +467,7 @@ function STL2PA.boundingBox(stl_filename, bounding, xmin, xmax, ymin, ymax,
 	if (string.match(bounding, "%+z")) then
 		for xi=0,(xmax-xmin)/dx_mm do
 			for yi=0,(ymax-ymin)/dy_mm do
-				pa:point(xi,yi,zimax, 0,adding)
+				pa:point(xi,yi,zimax, v,adding)
 			end
 		end
 	end
