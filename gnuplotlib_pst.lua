@@ -31,7 +31,8 @@ CHART_TYPES.scatter = 'points'            -- scatterplot (xlXYScatter)
 CHART_TYPES.scatter_lines = 'linespoints' -- scatterplot with connecting lines (xlXYScatterLines)
 CHART_TYPES.bar_vertical = 'boxes'        -- vertical bar chart (xlColumnClustered)
 CHART_TYPES.area = 'filledcurves'         -- area chart (xlArea)
-CHART_TYPES.dots = 'dots'               -- dots  -- added by pst
+CHART_TYPES.dots = 'dots'                 -- dots  -- added by pst
+CHART_TYPES.lines = 'lines'               -- lines  -- added by pst
 CHART_TYPES.none = 'none'                 -- no chart
 
 
@@ -304,10 +305,11 @@ function Plot:update_data(t)
       fh:write(('%s"-" using 1:2 title "%s" lc rgb "%s" '):format(
                 (iseries==1 and '' or ', '), header[c] or '', 
                 color[c-1] or 'dark-violet'))  -- added by pst
+      fh:write('with ', CHART_TYPES[self.chart_type], ' ')  -- added by pst
       iseries = iseries + 1
     end
   end
-  fh:write('with ', CHART_TYPES[self.chart_type], ' ')
+  -- fh:write('with ', CHART_TYPES[self.chart_type], ' ')
   fh:write('\n')
 
   

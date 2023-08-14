@@ -7,3 +7,5 @@ particlelib_pst.lua
 *.html
 *.Rproj
 stl2palib_debug/
+stl2pa_debugstuff/
+testplanelib.lua
