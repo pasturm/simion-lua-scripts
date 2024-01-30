@@ -181,6 +181,8 @@ function GNUPLOT.open()
   if osname and osname:match'CYGWIN' then
     -- nothing displays on non-xterm Cygwin without this.
     fh:write('set terminal ggi\n')
+  else
+    fh:write('set terminal wxt\n')
   end
   
   -- Keep the handle around in global memory.  Garbage collection of
