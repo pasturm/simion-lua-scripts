@@ -407,9 +407,13 @@ function STL2PA.boundingBox(stl_filename, bounding, xmin, xmax, ymin, ymax,
 									 zmin, zmax, dx_mm, dy_mm, dz_mm, add, voltage)
 	local path,name = splitPath(stl_filename)
 	local file = path..name..".pa#"
-	local adding = add or true
 	local v = voltage or 0
-
+	local adding
+	if (add == nil) then
+		adding = true
+	else
+		adding = add
+	end
 	if not adding then v = 0 end
 
 	if adding then
@@ -673,7 +677,12 @@ function STL2PA.convert(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm,
 		io.write(" ["..string.format("%.3f", end_time2-end_time1).." s]\n")
 	end
 
-	pa:save(path..name..".pa#")
+	local status = pcall(function () pa:save(path..name..".pa#") end)
+	if not status then
+		local n = tostring(math.floor(math.random()*1e6))
+		pa:save(path..name..n..".pa#")
+		print("Warning: Could not save pa# file. Saved it as "..name..n..".pa# instead.")
+	end
 	simion.pas:close()  -- remove all PAs from RAM.
 end
 

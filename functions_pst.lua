@@ -171,5 +171,92 @@ function M.sign(x)
 	return x > 0 and 1 or x < 0 and -1 or 0
 end
 
+-------------------------------------------------------------------------------------------------------
+-- Compute y-emittance from points in phase space.
+-------------------------------------------------------------------------------------------------------
+function M.compute_emittance(y, yprime, vx, vy, vz)
+    local y_ave = M.mean(y)
+    local yprime_ave = M.mean(yprime)
+    local sum_yy = 0
+    local sum_yprimeyprime = 0
+    local sum_yyprime = 0
+    local count = 0
+    for k,v in pairs(y) do
+        if type(v) == 'number' then
+            sum_yy = sum_yy + (v - y_ave) * (v - y_ave)
+            sum_yprimeyprime = sum_yprimeyprime + (yprime[k] - yprime_ave) * (yprime[k] - yprime_ave)
+            sum_yyprime = sum_yyprime + (v - y_ave) * (yprime[k] - yprime_ave)
+            count = count + 1
+        end
+    end
+    local yy = sum_yy / count  -- <yy>
+    local yprimeyprime = sum_yprimeyprime / count  -- <y'y'>
+    local yyprime = sum_yyprime / count  -- <yy'>
+    
+    local emit = math.sqrt(yy*yprimeyprime-yyprime*yyprime) * 1000  -- (mm * mrad)
+
+    -- Compute normalized emittance
+    local t = {}
+    for k,v in pairs(y) do 
+        t[k] = math.sqrt(vx[k]^2 + vy[k]^2 + vz[k]^2) 
+    end
+    local v_avg = M.mean(t)
+    local beta = v_avg / 300000  -- velocity relative to speed of light (mm/usec)
+    local gamma = 1 / math.sqrt(1 - beta^2)  -- Lorentz factor
+    local norm_emit = beta * gamma * emit
+
+    return emit, norm_emit
+end
+
+-------------------------------------------------------------------------------------------------------
+-- Linear least squares fit functions
+-------------------------------------------------------------------------------------------------------
+-- https://mathworld.wolfram.com/CorrelationCoefficient.html, https://mathworld.wolfram.com/LeastSquaresFitting.html
+
+-- Ordinary least squares fit
+function M.ols_fit(x,y)
+	local mean_x = M.mean(x)
+	local mean_y = M.mean(y)
+	local s_xy = 0
+	local s_xx = 0
+	for i,v in pairs(x) do
+		s_xy = s_xy + (v - mean_x) * (y[i] - mean_y)
+		s_xx = s_xx + (v - mean_x) * (v - mean_x)
+	end
+	local b = s_xy/s_xx
+	local a = mean_y - b*mean_x
+	return b,a
+end
+
+-- sample correlation coefficent
+function M.rxy(x, y)
+	local mean_x = M.mean(x)
+	local mean_y = M.mean(y)
+	local s_xy = 0
+	local s_xx = 0
+	local s_yy = 0
+	for i,v in pairs(x) do
+		s_xy = s_xy + (v - mean_x) * (y[i] - mean_y)
+		s_xx = s_xx + (v - mean_x) * (v - mean_x)
+		s_yy = s_yy + (y[i] - mean_y) * (y[i] - mean_y)
+	end
+	return s_xy/math.sqrt(s_xx*s_yy)
+end
+
+-- sum of squared residuals
+function M.ssr(x, y)
+	local mean_x = M.mean(x)
+	local mean_y = M.mean(y)
+	local s_xy = 0
+	local s_xx = 0
+	local s_yy = 0
+	for i,v in pairs(x) do
+		s_xy = s_xy + (v - mean_x) * (y[i] - mean_y)
+		s_xx = s_xx + (v - mean_x) * (v - mean_x)
+		s_yy = s_yy + (y[i] - mean_y) * (y[i] - mean_y)
+	end
+	return s_yy - s_xy*s_xy/s_xx
+end
+
 --------------------------------------------------------------------------------------------
 return M

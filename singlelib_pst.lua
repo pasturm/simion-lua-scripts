@@ -113,6 +113,14 @@ function M.runner(master)
     local result = serialize(o.jobrun(unserialize(s)))
     o.jobresult(unserialize(result))
   end
+
+  -- Schedule a single job. Do not consider result.
+  function o:prerun(...)
+    local s = ...
+    njobs = njobs + 1
+    print('job', s)
+    o.jobrun(unserialize(s))
+  end
   
   function o:process(master)
     o.jobsetup()
