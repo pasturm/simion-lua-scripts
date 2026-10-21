@@ -1,705 +1,763 @@
 --[[
 stl2palib.lua
 
-Library to convert an electrode geometry from STL files to a SIMION potential array file.
+STL to SIMION potential array conversion library.
 
-The main advantages compared to the stl2pa command from SIMION SL Tools (< 8.2.0.11) are:
+The main advantages compared to the stl2pa command from SIMION SL Tools are:
 1. The STL surface is filled with solid points (avoids the solid points 
-   strategy issues of SL Tools).
+   strategy issues of SL Tools < 8.2.0.11).
 2. The electrode surface enhancement feature can be used (leads to higher 
    field accuracies).
-3. Array mirroring can be used.
-4. Bounding boxes can easily be added.
-
-Multi-electrode systems are handled as in SL Tools with the "%" character
-as a placeholder in the STL file name.
-
-The input STL needs to be watertight and must not contain joined faces.
+3. Multiple electrodes can be generated from a single STL file.
+4. Array mirroring can be used.
+5. Bounding boxes can easily be added.
+6. Ideal and real wire grids can be added.
 
 Note: SIMION 8.2.0.11-20210626 SL Tools now contains similar functionality. But there are still bugs
-and it is slower than this lua script.
+and it is much slower than this lua script.
 
 Example:
-	-- load STL2PA library
-	local STL2PA = simion.import("./stl2palib.lua")
+  -- load STL2PA library
+  local STL2PA = simion.import("./stl2palib.lua")
 
-	-- STL input file
-	local stl_filename = "my_geometry-%.stl"
+  -- STL input file
+  local stl_filename = "my_geometry.stl"
 
-	-- region min and max points, mm
-	local xmin = -50
-	local xmax = 130
-	local ymin = -105
-	local ymax = 130
-	local zmin = -30
-	local zmax = 30
+  -- region min and max points, mm
+  local xmin = -50
+  local xmax = 130
+  local ymin = -105
+  local ymax = 130
+  local zmin = -30
+  local zmax = 30
 
-	-- grid cell size, mm
-	local dx_mm = 1
-	local dy_mm = 1
-	local dz_mm = 1
+  -- grid cell size, mm
+  local dx_mm = 1
+  local dy_mm = 1
+  local dz_mm = 1
 
-	-- surface enhancement
-	local surface = "fractional"
+  -- surface enhancement
+  local surface = "fractional"
 
-	-- bounding box
-	local boundingbox = "-x+x-y+y-z+z"
+  -- array symmetry and mirroring
+  local symmetry = "3dplanar[yz]"
 
-	-- array symmetry and mirroring
-	local symmetry = "3dplanar[yz]"
+  -- assign voltages to fully connected surfaces closest to the given point
+  -- {voltage, {x, y, z}}
+  local electrodes = {
+    {1, {0,-75,-70}},
+    {2, {0,-75,-66}}
+  }
 
-	-- run stl2pa conversion
-	STL2PA.convert(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm, dy_mm, dz_mm, surface, boundingbox, symmetry)
+  -- run stl2pa conversion
+  STL2PA.convert(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm, dy_mm, dz_mm, 
+            surface, symmetry, electrodes, "z")
 
-	-- -- modify or add one electrode in my_geometry.pa#
-	-- local electrode_no = 2  -- my_geometry-2.stl
-	-- STL2PA.modify(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, electrode_no, surface, boundingbox)
+  -- add electrode to existing .pa#
+  local add = true
+  STL2PA.convert(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm, dy_mm, dz_mm, 
+            surface, symmetry, electrodes, "z", add)
 
+  -- add bounding box in .pa# file
+  -- local boundingbox = "-x+x-y+y-z+z"
+  -- local add = true  -- false to remove boundary
+  -- STL2PA.boundingBox(stl_filename, boundingbox, add)
 
-Patrick Sturm
-(c) 2020-2022 TOFWERK
+  -- remove an electrode from .pa#
+  -- STL2PA.removeElectrode(stl_filename, electrode_no)
+
+Author: Patrick Sturm
+Copyright (c) 2020-2026 TOFWERK
 --]]
-
+ 
 local STL2PA = {}
-
-
--- Convert string of bytes (4 bytes) to IEEE-754 floating point ---------------
--- http://lua-users.org/lists/lua-l/2010-03/msg00911.html
-local function bytes2float(x)
-	local sign = 1
-	local mantissa = string.byte(x, 3) % 128
-	for i = 2, 1, -1 do mantissa = mantissa * 256 + string.byte(x, i) end
-	if string.byte(x, 4) > 127 then sign = -1 end
-	local exponent = (string.byte(x, 4) % 128) * 2 + math.floor(string.byte(x, 3) / 128)
-	if exponent == 0 then return 0 end
-	mantissa = (math.ldexp(mantissa, -23) + 1) * sign
-	return math.ldexp(mantissa, exponent - 127)
-end
-
-
--- Convert string of bytes (4 bytes) to 32-bit integer ------------------------
-local function bytes2int(x)
-	local i1,i2,i3,i4 = string.byte(x, 1, 4)
-	-- return i1 + 2^8*i2 + 2^16*i3 + 2^24*i4
-	-- return i1 + 256*i2 + 65536*i3 + 16777216*i4
-	return ((i4*256 + i3)*256 + i2)*256 + i1
-end
-
-
--- Check if STL file is in ASCII or binary format -----------------------------
-local function isascii(stl_filename)
-	local fh = io.open(stl_filename, "r")
-	local line = fh:read("*l")
-	fh:close()
-	if string.find(line, "^solid ") then
-		return true
-	else
-		return false
-	end
-end
-
-
--- Read a STL file ------------------------------------------------------------
-function STL2PA.readSTL(stl_filename)
-	local t_faces = {}
-	local current_face = {}
-	local z0
-	if isascii(stl_filename) then
-		-- parse stl file (from http://lua-users.org/wiki/StlToObj)
-		local fh = io.open(stl_filename, "r")
-		local count = 0
-		for line in fh:lines() do
-			if string.find(line, "^%s*facet normal") then
-				local x,y,z = string.match(line, "(%S+)%s(%S+)%s(%S+)$")
-				table.insert(current_face, {tonumber(x),tonumber(y),tonumber(z)})
-			elseif string.find(line, "^%s*vertex") then
-				local x,y,z = string.match(line, "(%S+)%s(%S+)%s(%S+)$")
-				table.insert(current_face, {tonumber(x),tonumber(y),tonumber(z)})
-				count = count + 1
-				if count == 3 then
-					table.insert(t_faces,current_face)
-					current_face = {}
-					count = 0
-				end
-			end
-		end
-		fh:close()
-	else
-		local fh = io.open(stl_filename, "rb")
-		fh:seek("cur", 80)  -- ignore header
-		local triangles = bytes2int(fh:read(4))  -- number of triangles
-		for i=1,triangles do
-			local x = bytes2float(fh:read(4))  -- normal vector
-			local y = bytes2float(fh:read(4))
-			local z = bytes2float(fh:read(4))
-			table.insert(current_face, {x,y,z})
-			local x = bytes2float(fh:read(4))  -- vertex 1
-			local y = bytes2float(fh:read(4))
-			local z = bytes2float(fh:read(4))
-			table.insert(current_face, {x,y,z})
-			local x = bytes2float(fh:read(4))  -- vertex 2
-			local y = bytes2float(fh:read(4))
-			local z = bytes2float(fh:read(4))
-			table.insert(current_face, {x,y,z})
-			local x = bytes2float(fh:read(4))  -- vertex 3
-			local y = bytes2float(fh:read(4))
-			local z = bytes2float(fh:read(4))
-			table.insert(current_face, {x,y,z})
-			fh:read(2)  -- ignore attribute byte count
-			table.insert(t_faces,current_face)
-			current_face = {}
-		end
-		fh:close()
-	end
-	return t_faces
-end
-
-
--- Calculate Axis Aligned Bounding Boxes of the triangles ---------------------
--- Note: only 2D projection is needed.
-local function boundingBoxes(t_faces)
-	local t_bb = {}
-	for _,v in ipairs(t_faces) do
-		local min_x = math.min(v[2][1], v[3][1], v[4][1])
-		local max_x = math.max(v[2][1], v[3][1], v[4][1])
-		local min_y = math.min(v[2][2], v[3][2], v[4][2])
-		local max_y = math.max(v[2][2], v[3][2], v[4][2])
-		table.insert(t_bb, {min_x,max_x,min_y,max_y})
-	end
-	return t_bb
-end
-
-
--- Calculate STL size ---------------------------------------------------------
-function STL2PA.stlSize(t_faces)
-	local min_x = math.huge
-	local max_x = -math.huge
-	local min_y = math.huge
-	local max_y = -math.huge
-	local min_z = math.huge
-	local max_z = -math.huge
-	for _,v in ipairs(t_faces) do
-		min_x = math.min(min_x, v[2][1], v[3][1], v[4][1])
-		max_x = math.max(max_x, v[2][1], v[3][1], v[4][1])
-		min_y = math.min(min_y, v[2][2], v[3][2], v[4][2])
-		max_y = math.max(max_y, v[2][2], v[3][2], v[4][2])
-		min_z = math.min(min_z, v[2][3], v[3][3], v[4][3])
-		max_z = math.max(max_z, v[2][3], v[3][3], v[4][3])
-	end
-	return {min_x, max_x, min_y, max_y, min_z, max_z}
-end
-
-
--- Check if two rectangles overlap (or touch each other) ----------------------
-local function doRectaglesOverlap(xmin1,xmax1,ymin1,ymax1,xmin2,xmax2,ymin2,ymax2)
-	-- if one rectangle is on left side of other 
-	if (xmin1 > xmax2 or xmin2 > xmax1) then
-	    return false
-	-- if one rectangle is above other 
-	elseif (ymin1 > ymax2 or ymin2 > ymax1) then
-	    return false
-	else
-		return true
-	end
-end
-
-
--- Hash the triangle bounding boxes to a 2D grid ------------------------------
--- The output is a 3D array, where the first two dimensions are
--- the grid point indices and the third dimension is a vector
--- where the n-th element is 0 if the n-th bounding box is inside the grid cell
--- and nil if it is completely outside. 
-local function map2Grid(t_faces, t_size, dx_mm, dy_mm, xmin, xmax, ymin, ymax)
-	local x_min = math.max(math.floor(t_size[1]/dx_mm)*dx_mm, xmin)
-	local x_max = math.min(math.ceil(t_size[2]/dx_mm)*dx_mm, xmax)
-	local y_min = math.max(math.floor(t_size[3]/dy_mm)*dy_mm, ymin)
-	local y_max = math.min(math.ceil(t_size[4]/dy_mm)*dy_mm, ymax)
-	local t_bb = boundingBoxes(t_faces)
-	local t_hash = {}
-	for i=1,(x_max-x_min)/dx_mm+1 do  -- loop over x axis
-		t_hash[i] = {}
-		-- convert the grid point indices to min and max
-		-- values of the grid cell boundary
-		local x0 = (i-1)*dx_mm + x_min
-		local x1 = (i)*dx_mm + x_min
-		for j=1,(y_max-y_min)/dy_mm+1 do  -- loop over y axis
-			t_hash[i][j] = {}
-			local y0 = (j-1)*dy_mm + y_min
-			local y1 = (j)*dy_mm + y_min
-			for k,v in ipairs(t_bb) do  -- loop over bounding boxes
-				-- check if the bounding box touches the grid cell
-				if (doRectaglesOverlap(x0,x1,y0,y1,v[1],v[2],v[3],v[4])) then
-					t_hash[i][j][k] = 0
-				end
-			end
-		end
-	end
-	return t_hash
-end
-
-
--- Get the unique elements of a table -----------------------------------------
--- https://stackoverflow.com/questions/20066835/lua-remove-duplicate-elements
-local function getUniqueElements(t_in)
-	local hash = {}
-	local res = {}
-	for _,v in ipairs(t_in) do
-	   if (not hash[v]) then
-	       res[#res+1] = v
-	       hash[v] = true
-	   end
-	end
-	return res
-end
-
--- check whether a grid point is inside the STL -------------------------------
--- from http://geomalgorithms.com/a06-_intersect-2.html
--- all points on STL surface are also considered to be inside
-local function isInsideSTL(x,y,z, t_faces, xmin, xmax, ymin, ymax, zmin, zmax, t_hash, dx_mm, dy_mm)
-	if (x<xmin or x>xmax or y<ymin or y>ymax or z<zmin or z>zmax) then -- outside of STL
-		return false
-	end
-	local i = math.floor((x-xmin)/dx_mm) + 1  -- hash table grid index
-	local j = math.floor((y-ymin)/dy_mm) + 1
-	local r_array = {}  -- use this to check whether ray hits edge of two connected triangles
-	for l,_ in pairs(t_hash[i][j]) do  -- loop through all relevant triangles
-		-- Note: ipairs does not work here, it stops at the first nil -> use pairs 
-		-- ray-triangle intersection testing:
-		-- triangle vertices
-		local v0_1 = t_faces[l][2][1]
-		local v0_2 = t_faces[l][2][2]
-		local v0_3 = t_faces[l][2][3]
-		local v1_1 = t_faces[l][3][1]
-		local v1_2 = t_faces[l][3][2]
-		local v1_3 = t_faces[l][3][3]
-		local v2_1 = t_faces[l][4][1]
-		local v2_2 = t_faces[l][4][2]
-		local v2_3 = t_faces[l][4][3]
-		-- trianlge vectors
-		local u1 = v1_1-v0_1
-		local u2 = v1_2-v0_2
-		local u3 = v1_3-v0_3
-		local v1 = v2_1-v0_1
-		local v2 = v2_2-v0_2
-		local v3 = v2_3-v0_3
-		local n1 = t_faces[l][1][1]
-		local n2 = t_faces[l][1][2]
-		local n3 = t_faces[l][1][3]
-		-- ray direction
-		local l1 = 1e-5
-		local l2 = 1e-5
-		local l3 = math.sqrt(1-2e-10)
-		-- distance to plane (https://en.wikipedia.org/wiki/Line%E2%80%93plane_intersection)
-		local r = (n1*(v0_1-x)+n2*(v0_2-y)+n3*(v0_3-z))/(l1*n1+l2*n2+l3*n3)
-		if (r>=0) then  -- ray goes towards triangle
-			-- intersect point of ray and plane
-			local I1 = x+l1*r
-			local I2 = y+l2*r
-			local I3 = z+l3*r
-		 	local uu = (u1*u1 + u2*u2 + u3*u3)
-			local uv = (u1*v1 + u2*v2 + u3*v3)
-			local vv = (v1*v1 + v2*v2 + v3*v3)
-			local w1 = I1-v0_1
-			local w2 = I2-v0_2
-			local w3 = I3-v0_3
-			local wu = (w1*u1 + w2*u2 + w3*u3)
-			local wv = (w1*v1 + w2*v2 + w3*v3)
-			local D = uv*uv - uu*vv
-			local s = (uv*wv - vv*wu)/D
-			local t = (uv*wu - uu*wv)/D
-			-- I is inside or on edge or on corner of T  
-			if (s>=0 and s<=1 and t>=0 and (s+t)<=1) then
-				if (r==0) then
-					return true
-				end
-				table.insert(r_array, r)
-			end
-		end
-	end
-	if #r_array==0 then return false end  -- no intersection
-	local res = getUniqueElements(r_array)
-	local count = #res
-	if (count%2==1) then
-		return true
-	else
-		return false
-	end
-end
-
 
 -- Split path/filename into path, filename and extension ----------------------
 local function splitPath(path)
-	return string.match(path, "(.-)([^\\/]-)%.?([^%.\\/]*)$")  -- path, filename without extension, extension
+  return string.match(path, "(.-)([^\\/]-)%.?([^%.\\/]*)$")
 end
 
+-- Convert 4-byte binary string to unsigned 32-bit integer ------------------------
+local function read_uint32(str, offset)
+  local i1, i2, i3, i4 = string.byte(str, offset, offset+3)
+  return ((i4*256 + i3)*256 + i2)*256 + i1
+end
 
--- Find all STL files
--- Note: To convert multiple overlapping STL files into single PA file, have your CAD software create one STL file for each electrode. 
--- Each file must be numbered by the potential it will be assigned in the PA file (e.g. myfile-1.stl, myfile-2.stl, and myfile-3.stl). 
--- Then set stl_filename to a template for the input file name using the "%" character as a placeholder (e.g. "my-file-%.stl"). 
--- The SL Tools will search and read all matching STL files and assign these voltages of 1V, 2V, and 3V respectively.
--- Adapted from https://stackoverflow.com/questions/5303174/how-to-get-list-of-directories-in-lua
-local function getSTLfiles(stl_filename)
-	local path,name,ext = splitPath(stl_filename)
-	local basename =  string.match(stl_filename, "^.+/(.+)%-%%")  -- filename up to %
-    local i, t, popen = 0, {}, io.popen
-    local pfile = popen('dir "'..path..'" /b')
-    for filename in pfile:lines() do
-    	if string.match(filename, basename.."%-") and (string.match(filename, ".stl") or string.match(filename, ".ast")) then
-	        i = i + 1
-	        t[i] = filename
-	    end
+-- Convert 4-byte binary string to little-endian IEEE-754 single-precision float ----
+-- b4 = [sign:1][exp high 7] | b3 = [exp low 1][mant high 7] | b2,b1 = mantissa
+local function read_float32(str, offset)
+  offset = offset or 1
+  local b1, b2, b3, b4 = string.byte(str, offset, offset + 3)
+  local sign = 1
+  if b4 > 127 then sign = -1 end
+  local mantissa = ((b3%128)*256 + b2)*256 + b1
+  local exponent = (b4%128) * 2 + math.floor(b3/128)
+  if exponent == 0 then return 0 end
+  return sign * (1+mantissa/2^23) * 2^(exponent-127)
+end
+
+-- Read a STL file ------------------------------------------------------------
+local function readSTL(filename)
+  local fh = assert(io.open(filename,"rb"))
+  local s = assert(fh:read("*a"))
+  fh:close()
+ 
+  local triangles = {}
+  local binary = #s >= 84 and #s == 84+50*read_uint32(s,81)
+ 
+  if binary then
+    local n = read_uint32(s,81)
+    local p = 85
+    for _=1,n do
+      triangles[#triangles+1] = {
+        read_float32(s,p+12),read_float32(s,p+16),read_float32(s,p+20),
+        read_float32(s,p+24),read_float32(s,p+28),read_float32(s,p+32),
+        read_float32(s,p+36),read_float32(s,p+40),read_float32(s,p+44)
+      }
+      p = p+50
     end
-    pfile:close()
-    return t
+  else
+    local v = {}
+    for a,b,c in s:gmatch("[vV]ertex%s+(%S+)%s+(%S+)%s+(%S+)") do
+      v[#v+1] = tonumber(a)
+      v[#v+1] = tonumber(b) 
+      v[#v+1] = tonumber(c)
+    end
+    for i=0,#v-9,9 do
+      triangles[#triangles+1] = {v[i+1],v[i+2],v[i+3],v[i+4],v[i+5],v[i+6],v[i+7],v[i+8],v[i+9]}
+    end
+  end
+  return triangles
+end
+ 
+local function qround(x, scale)
+  if x >= 0 then return math.floor(x*scale+0.5) end
+  return -math.floor(-x*scale+0.5)
+end
+ 
+-- Build vertex-connected triangle components using a union-find data structure.
+local function build_components(triangles)
+  local vertex_scale = 1e6
+  local keyid,parent,rank = {},{},{}
+  local vx,vy,vz = {},{},{}
+  local ta = {}
+ 
+  local function vertex(x,y,z)
+    local key = qround(x,vertex_scale)..","..qround(y,vertex_scale)..","..qround(z,vertex_scale)
+    local id = keyid[key]
+    if not id then
+      id = #parent+1
+      keyid[key] = id
+      parent[id] = id
+      rank[id] = 0
+      vx[id],vy[id],vz[id] = x,y,z
+    end
+    return id
+  end
+ 
+  -- find the root of the tree and compress the path
+  local function find(a)
+    local root = a
+    while parent[root] ~= root do
+      root = parent[root]
+    end
+    while parent[a] ~= root do
+      local next_a = parent[a]
+      parent[a] = root
+      a = next_a
+    end
+    return root
+  end
+ 
+  -- connect two vertices
+  local function union(a,b)
+    a,b = find(a),find(b)
+    if a == b then return end
+    if rank[a] < rank[b] then a,b = b,a end
+    parent[b] = a
+    if rank[a] == rank[b] then rank[a] = rank[a]+1 end
+  end
+ 
+  for i=1,#triangles do
+    local t = triangles[i]
+    local a = vertex(t[1],t[2],t[3])
+    local b = vertex(t[4],t[5],t[6])
+    local c = vertex(t[7],t[8],t[9])
+    union(a,b)
+    union(a,c)
+    ta[i] = a
+  end
+ 
+  local rootcid = {}
+  local C = {}
+ 
+  for i=1,#triangles do
+    local root = find(ta[i])
+    local cid = rootcid[root]
+ 
+    if not cid then
+      cid = #C+1
+      rootcid[root] = cid
+      C[cid] = {
+        triangle = {},
+        xmin = math.huge,xmax = -math.huge,
+        ymin = math.huge,ymax = -math.huge,
+        zmin = math.huge,zmax = -math.huge
+      }
+    end
+ 
+    local c = C[cid]
+    local t = triangles[i]
+    c.triangle[#c.triangle+1] = i
+ 
+    for p=1,7,3 do
+      local x,y,z = t[p],t[p+1],t[p+2]
+      c.xmin = math.min(c.xmin,x)
+      c.xmax = math.max(c.xmax,x)
+      c.ymin = math.min(c.ymin,y)
+      c.ymax = math.max(c.ymax,y)
+      c.zmin = math.min(c.zmin,z)
+      c.zmax = math.max(c.zmax,z)
+    end
+  end
+ 
+  local vc = {}
+  for i=1,#vx do vc[i] = rootcid[find(i)] end
+ 
+  return C,vx,vy,vz,vc
+end
+ 
+-- Map each electrode seed to the component containing its nearest stored vertex.
+-- If several seeds select one component, the last seed retains precedence.
+local function mapSeeds(E,vx,vy,vz,vc)
+  local mapped,last = {},{}
+ 
+  for e=1,#E do
+    local p = E[e][2]
+    local best,bi = math.huge,1
+ 
+    for i=1,#vx do
+      local x = p[1]-vx[i]
+      local y = p[2]-vy[i]
+      local z = p[3]-vz[i]
+      local d = x*x+y*y+z*z
+ 
+      if d < best then
+        best,bi = d,i
+      end
+    end
+ 
+    mapped[e] = vc[bi]
+    last[mapped[e]] = e
+  end
+ 
+  local S = {}
+ 
+  for e=1,#E do
+    local cid = mapped[e]
+ 
+    if last[cid] == e then
+      S[#S+1] = {cid=cid, V=E[e][1], seed=e}
+    end
+  end
+ 
+  return S,#E-#S
+end
+ 
+-- Precompute the spatial lookup for one component.
+--
+-- Ordinary nonparallel triangles:
+--   R = projected A/B/C plus affine wi(u,v)
+--   B = projected cell -> R record IDs
+-- Projected-degenerate/ray-parallel triangles:
+--   D  = complete 3D triangle coordinates
+--   DB = projected cell -> D record IDs
+local function preprocess(c,triangles,iu,iv,iw,u0,v0,du,dv,nu,nv)
+  local R,B = {},{}
+  local D,DB = {},{}
+  local ulast = u0+(nu-1)*du
+  local vlast = v0+(nv-1)*dv
+ 
+  local function clip(value,lo,hi)
+    if value < lo then return lo end
+    if value > hi then return hi end
+    return value
+  end
+ 
+  local function insert(cells,id,umin,umax,vmin,vmax)
+    if umax < u0 or umin > ulast or
+       vmax < v0 or vmin > vlast
+    then
+      return
+    end
+    local i0 = clip(math.floor((umin-u0)/du),0,nu-1)
+    local i1 = clip(math.floor((umax-u0)/du),0,nu-1)
+    local j0 = clip(math.floor((vmin-v0)/dv),0,nv-1)
+    local j1 = clip(math.floor((vmax-v0)/dv),0,nv-1)
+    for i=i0,i1 do
+      local row = i*nv
+      for j=j0,j1 do
+        local key = row+j+1
+        local cell = cells[key]
+        if not cell then
+          cell = {}
+          cells[key] = cell
+        end
+        cell[#cell+1] = id
+      end
+    end
+  end
+ 
+  for _,ti in ipairs(c.triangle) do
+    local t = triangles[ti]
+    local au,av,aw = t[iu],t[iv],t[iw]
+    local bu,bv,bw = t[iu+3],t[iv+3],t[iw+3]
+    local cu,cv,cw = t[iu+6],t[iv+6],t[iw+6]
+    local d = (bu-au)*(cv-av) - (bv-av)*(cu-au)
+ 
+    if d ~= 0 then
+      -- Normalize the projected triangle to counter-clockwise winding.
+      if d < 0 then
+        bu,cu = cu,bu
+        bv,cv = cv,bv
+        bw,cw = cw,bw
+        d = -d
+      end
+ 
+      local a1 = (bv-cv)/d
+      local b1 = (cu-bu)/d
+      local c1 = -a1*cu-b1*cv
+      local a2 = (cv-av)/d
+      local b2 = (au-cu)/d
+      local c2 = -a2*cu-b2*cv
+      local acw = aw-cw
+      local bcw = bw-cw
+      local wu = a1*acw+a2*bcw
+      local wv = b1*acw+b2*bcw
+      local wc = cw+c1*acw+c2*bcw
+ 
+      local base = #R
+      local rid = base/9+1
+ 
+      R[base+1],R[base+2] = au,av
+      R[base+3],R[base+4] = bu,bv
+      R[base+5],R[base+6] = cu,cv
+      R[base+7],R[base+8],R[base+9] = wu,wv,wc
+ 
+      insert(B, rid, math.min(au,bu,cu), math.max(au,bu,cu), math.min(av,bv,cv), math.max(av,bv,cv))
+    else
+      local base = #D
+      local did = base/9+1
+ 
+      D[base+1],D[base+2],D[base+3] = au,av,aw
+      D[base+4],D[base+5],D[base+6] = bu,bv,bw
+      D[base+7],D[base+8],D[base+9] = cu,cv,cw
+ 
+      insert(DB,did, math.min(au,bu,cu), math.max(au,bu,cu), math.min(av,bv,cv), math.max(av,bv,cv))
+    end
+  end
+ 
+  c.R,c.B = R,B
+  c.D,c.DB = D,DB
+end
+ 
+-- Inclusive 3D surface test for a triangle whose u-v projection is degenerate.
+local function on_parallel_triangle(u,v,w,D,o,eps)
+  local au,av,aw = D[o+1],D[o+2],D[o+3]
+  local bu,bv,bw = D[o+4],D[o+5],D[o+6]
+  local cu,cv,cw = D[o+7],D[o+8],D[o+9]
+  local ux,uy,uz = bu-au,bv-av,bw-aw
+  local vx,vy,vz = cu-au,cv-av,cw-aw
+  local px,py,pz = u-au,v-av,w-aw
+  local nx = uy*vz-uz*vy
+  local ny = uz*vx-ux*vz
+  local nz = ux*vy-uy*vx
+  local n2 = nx*nx+ny*ny+nz*nz
+  if n2 == 0 then return false end
+  local plane = px*nx+py*ny+pz*nz
+  if plane*plane > eps*eps*n2 then return false end
+  local uu = ux*ux+uy*uy+uz*uz
+  local uv = ux*vx+uy*vy+uz*vz
+  local vv = vx*vx+vy*vy+vz*vz
+  local wu = px*ux+py*uy+pz*uz
+  local wv = px*vx+py*vy+pz*vz
+  local den = uu*vv-uv*uv
+  if den <= 0 then return false end
+  local s = (vv*wu-uv*wv)/den
+  local t = (uu*wv-uv*wu)/den
+  local beps = eps*math.sqrt(math.max(uu,vv)/den)
+  return s >= -beps and t >= -beps and s+t <= 1+beps
+end
+ 
+function STL2PA.convert(filename, xmin, xmax, ymin, ymax, zmin, zmax,
+  dx, dy, dz, surface, symmetry, E, direction, add)
+  E = E or {{0,{0,0,0}}}
+  direction = direction or "z"
+  surface = surface or "none"
+  add = add or false
+ 
+  assert(direction == "x" or direction == "y" or direction == "z")
+ 
+  local path,name = splitPath(filename)
+  simion.pas:close()
+ 
+  local pa
+  local nx = math.floor((xmax-xmin)/dx+0.5)+1
+  local ny = math.floor((ymax-ymin)/dy+0.5)+1
+  local nz = math.floor((zmax-zmin)/dz+0.5)+1
+ 
+  if add then
+    pa = simion.pas:open(path..name..".pa#")
+    dx,dy,dz = pa.dx_mm,pa.dy_mm,pa.dz_mm
+    nx,ny,nz = pa.nx,pa.ny,pa.nz
+  else
+    pa = simion.pas:open()
+    pa:size(nx,ny,nz)
+    pa.dx_mm,pa.dy_mm,pa.dz_mm = dx,dy,dz
+    pa.symmetry = symmetry or "3dplanar"
+  end
+ 
+  local start = os.clock()
+  io.write("Reading STL... ")
+  io.flush()
+ 
+  local triangles = readSTL(filename)
+ 
+  io.write(#triangles.." triangles\nFinding connected components...\n")
+  io.flush()
+ 
+  local C,vx,vy,vz,vc = build_components(triangles)
+  local S,reused = mapSeeds(E,vx,vy,vz,vc)
+ 
+  io.write(#E.." electrode seed(s)\n")
+  io.write(#S.." unique component(s) selected\n")
+  io.write(reused.." duplicate component selection(s) ignored\n")
+ 
+  local iu,iv,iw,u0,v0,du,dv,nu,nv
+  if direction == "z" then
+    iu,iv,iw,u0,v0,du,dv,nu,nv = 1,2,3,xmin,ymin,dx,dy,nx,ny
+  elseif direction == "y" then
+    iu,iv,iw,u0,v0,du,dv,nu,nv = 1,3,2,xmin,zmin,dx,dz,nx,nz
+  else
+    iu,iv,iw,u0,v0,du,dv,nu,nv = 3,2,1,zmin,ymin,dz,dy,nz,ny
+  end
+ 
+  local G = {}
+  local ulast = u0+(nu-1)*du
+  local vlast = v0+(nv-1)*dv
+ 
+  for _,q in ipairs(S) do
+    local c = C[q.cid]
+    q.c = c
+    if direction == "z" then
+      c.umin,c.umax = c.xmin,c.xmax
+      c.vmin,c.vmax = c.ymin,c.ymax
+      c.wmin,c.wmax = c.zmin,c.zmax
+    elseif direction == "y" then
+      c.umin,c.umax = c.xmin,c.xmax
+      c.vmin,c.vmax = c.zmin,c.zmax
+      c.wmin,c.wmax = c.ymin,c.ymax
+    else
+      c.umin,c.umax = c.zmin,c.zmax
+      c.vmin,c.vmax = c.ymin,c.ymax
+      c.wmin,c.wmax = c.xmin,c.xmax
+    end
+ 
+    c.surface_eps = 1e-9 * math.max(c.umax-c.umin, c.vmax-c.vmin, c.wmax-c.wmin, du, dv, 1)
+ 
+    preprocess(c,triangles,iu,iv,iw,u0,v0,du,dv,nu,nv)
+ 
+    if not (c.umax < u0 or c.umin > ulast or c.vmax < v0 or c.vmin > vlast) then
+      local i0 = math.max(0,math.floor((c.umin-u0)/du))
+      local i1 = math.min(nu-1,math.floor((c.umax-u0)/du))
+      local j0 = math.max(0,math.floor((c.vmin-v0)/dv))
+      local j1 = math.min(nv-1,math.floor((c.vmax-v0)/dv))
+ 
+      for i=i0,i1 do
+        local row = i*nv
+        for j=j0,j1 do
+          local key = row+j+1
+          local cell = G[key]
+          if not cell then
+            cell = {}
+            G[key] = cell
+          end
+          cell[#cell+1] = q
+        end
+      end
+    end
+  end
+ 
+  -- Determine whether an exact point (u,v,w) lies in a selected component.
+  local function classify(u,v,w)
+    if u < u0 or u > ulast or
+       v < v0 or v > vlast
+    then
+      return nil
+    end
+ 
+    local i = math.floor((u-u0)/du)
+    local j = math.floor((v-v0)/dv)
+ 
+    -- Protect the exact global maximum from a rounded quotient of nu/nv.
+    if i >= nu then i = nu-1 end
+    if j >= nv then j = nv-1 end
+ 
+    local key = i*nv+j+1
+    local candidate = G[key]
+    if not candidate then return nil end
+ 
+    -- Reverse traversal preserves the existing last-selected precedence.
+    for n=#candidate,1,-1 do
+      local q = candidate[n]
+      local c = q.c
+      local eps = c.surface_eps
+ 
+      if u >= c.umin and u <= c.umax and
+         v >= c.vmin and v <= c.vmax and
+         w >= c.wmin-eps and w <= c.wmax+eps
+      then
+        -- Projected-degenerate triangles are surface-only exceptions.
+        local db = c.DB[key]
+        if db then
+          local D = c.D
+          for m=1,#db do
+            local o = (db[m]-1)*9
+            if on_parallel_triangle(u,v,w,D,o,eps) then
+              return q.V
+            end
+          end
+        end
+ 
+        local b = c.B[key]
+        if b then
+          local R = c.R
+          local count = 0
+          for m=1,#b do
+            local o = (b[m]-1)*9
+            local au,av = R[o+1],R[o+2]
+            local bu,bv = R[o+3],R[o+4]
+            local cu,cv = R[o+5],R[o+6]
+ 
+            -- Three independent query-relative edge functions. Since the
+            -- triangle is CCW, nonnegative values are inclusive coverage.
+            local eA = (bu-u)*(cv-v) - (bv-v)*(cu-u) -- edge B->C
+            local eB = (cu-u)*(av-v) - (cv-v)*(au-u) -- edge C->A
+            local eC = (au-u)*(bv-v) - (av-v)*(bu-u) -- edge A->B
+ 
+            if eA >= 0 and eB >= 0 and eC >= 0 then
+              local wi = R[o+7]*u+R[o+8]*v+R[o+9]
+              local distance = wi-w
+ 
+              -- Surface membership is inclusive and independent of parity.
+              if distance >= -eps and distance <= eps then
+                return q.V
+              end
+ 
+              if distance > eps then
+                if eA > 0 and eB > 0 and eC > 0 then
+                  count = count+1
+                else
+                  -- Half-open top-left rule. Directed edge P->Q owns an exact
+                  -- zero when dv>0, or when horizontal and du<0. At a vertex,
+                  -- all incident zero-edge conditions for this triangle pass.
+                  local ownA = eA > 0 or (eA == 0 and (cv > bv or (cv == bv and cu < bu)))
+                  local ownB = eB > 0 or (eB == 0 and (av > cv or (av == cv and au < cu)))
+                  local ownC = eC > 0 or (eC == 0 and (bv > av or (bv == av and bu < au)))
+ 
+                  if ownA and ownB and ownC then
+                    count = count+1
+                  end
+                end
+              end
+            end
+          end
+          if count%2 == 1 then return q.V end
+        end
+      end
+    end
+ 
+    return nil
+  end
+ 
+  io.write("Preparation: "..string.format("%.3f",os.clock()-start).." s\n")
+  io.write("Filling PA... ")
+  io.flush()
+ 
+  local fill_start = os.clock()
+ 
+  pa:fill{
+    function(x,y,z)
+      local xm,ym,zm = xmin+x,ymin+y,zmin+z
+      local V
+ 
+      if direction == "z" then
+        V = classify(xm,ym,zm)
+      elseif direction == "y" then
+        V = classify(xm,zm,ym)
+      else
+        V = classify(zm,ym,xm)
+      end
+ 
+      if V ~= nil then return V,true end
+      if not add then return 0,false end
+    end,
+    surface=surface
+  }
+ 
+  io.write("["..string.format("%.3f",os.clock()-fill_start).." s]\n")
+  pa:save(path..name..".pa#")
+  simion.pas:close()
+end
+ 
+-- Add or remove a bounding box in a PA# file. ---------------------------
+function STL2PA.boundingBox(filename,bounding,add,V)
+  local path,name = splitPath(filename)
+  local file = path..name..".pa#"
+ 
+  if add == nil then add = true end
+  V = add and (V or 0) or 0
+ 
+  simion.pas:close()
+  local pa = simion.pas:open(file)
+  local X,Y,Z = pa.nx-1,pa.ny-1,pa.nz-1
+ 
+  if bounding:match("%-x") then
+    for y=0,Y do for z=0,Z do pa:point(0,y,z,V,add) end end
+  end
+  if bounding:match("%+x") then
+    for y=0,Y do for z=0,Z do pa:point(X,y,z,V,add) end end
+  end
+  if bounding:match("%-y") then
+    for x=0,X do for z=0,Z do pa:point(x,0,z,V,add) end end
+  end
+  if bounding:match("%+y") then
+    for x=0,X do for z=0,Z do pa:point(x,Y,z,V,add) end end
+  end
+  if bounding:match("%-z") then
+    for x=0,X do for y=0,Y do pa:point(x,y,0,V,add) end end
+  end
+  if bounding:match("%+z") then
+    for x=0,X do for y=0,Y do pa:point(x,y,Z,V,add) end end
+  end
+ 
+  pa:save(file)
+  simion.pas:close()
+end
+ 
+-- Remove one electrode from an existing PA# array. ----------------------------
+function STL2PA.removeElectrode(filename,electrode_no)
+  local path,name = splitPath(filename)
+  local file = path..name..".pa#"
+ 
+  simion.pas:close()
+  local pa = simion.pas:open(file)
+ 
+  for xi,yi,zi in pa:points() do
+    if pa:potential(xi,yi,zi) == electrode_no then
+      pa:point(xi,yi,zi,0,false)
+    end
+  end
+ 
+  pa:save(file)
+  simion.pas:close()
+end
+ 
+-- Add an ideal zero-thickness grid region. --------------------------------
+function STL2PA.addIdealGrid(filename,xmin,xmax,ymin,ymax,zmin,zmax,voltage)
+  local path,name = splitPath(filename)
+  local file = path..name..".pa#"
+  local v = voltage or 0
+ 
+  io.write("Adding ideal grid...\n")
+  io.flush()
+  simion.pas:close()
+ 
+  local pa = simion.pas:open(file)
+ 
+  pa:fill{
+    function(x,y,z)
+      if x >= xmin and x <= xmax and
+         y >= ymin and y <= ymax and
+         z >= zmin and z <= zmax
+      then
+        return v,true
+      end
+    end,
+    surface="none"
+  }
+ 
+  pa:save(file)
+  simion.pas:close()
 end
 
-
--- write header ---------------------------------------------------------------
-local function writeHeader()
-	io.write("\n*********************************************\n")
-	io.write("STL2PA CONVERSION\n")
-	io.write("Copyright (c) 2020-2022 TOFWERK\n")
-	io.write("Author: Patrick Sturm\n")
-	io.write("*********************************************\n\n")
-	io.flush()
+-- add real grid in .pa# file -----------------------------------
+local function wire_distance(value,pitch)
+  return math.min(value%pitch,(-value)%pitch)
 end
-
-
--- add bounding box -----------------------------------------------------------
-local function addBoundingBox(bounding, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm, dy_mm, dz_mm)
-	if (string.match(bounding, "%-x")) then
-		for yi=0,(ymax-ymin)/dy_mm do
-			for zi=0,(zmax-zmin)/dz_mm do
-				pa:point(0,yi,zi, 0,true)
-			end
-		end
-	end
-	if (string.match(bounding, "%+x")) then
-		local ximax = (xmax-xmin)/dx_mm
-		for yi=0,(ymax-ymin)/dy_mm do
-			for zi=0,(zmax-zmin)/dz_mm do
-				pa:point(ximax,yi,zi, 0,true)
-			end
-		end
-	end
-	if (string.match(bounding, "%-y")) then
-		for xi=0,(xmax-xmin)/dx_mm do
-			for zi=0,(zmax-zmin)/dz_mm do
-				pa:point(xi,0,zi, 0,true)
-			end
-		end
-	end
-	if (string.match(bounding, "%+y")) then
-		local yimax = (ymax-ymin)/dy_mm
-		for xi=0,(xmax-xmin)/dx_mm do
-			for zi=0,(zmax-zmin)/dz_mm do
-				pa:point(xi,yimax,zi, 0,true)
-			end
-		end
-	end
-	if (string.match(bounding, "%-z")) then
-		for xi=0,(xmax-xmin)/dx_mm do
-			for yi=0,(ymax-ymin)/dy_mm do
-				pa:point(xi,yi,0, 0,true)
-			end
-		end
-	end
-	if (string.match(bounding, "%+z")) then
-		local zimax = (zmax-zmin)/dz_mm
-		for xi=0,(xmax-xmin)/dx_mm do
-			for yi=0,(ymax-ymin)/dy_mm do
-				pa:point(xi,yi,zimax, 0,true)
-			end
-		end
-	end
+ 
+function STL2PA.addRealGrid(filename,xmin,xmax,ymin,ymax,zmin,zmax,
+  voltage,pitch,radius,dir_wire,dir_plane)
+  local path,name = splitPath(filename)
+  local file = path..name..".pa#"
+  local v = voltage or 0
+  local p = pitch or 0
+  local r = radius or 0
+  local dw = dir_wire or "z"
+  local dp = dir_plane or "y"
+ 
+  assert(p > 0,"grid pitch must be > 0")
+  assert(r >= 0,"grid radius must be >= 0")
+ 
+  local valid = {xy=true, yx=true, zy=true, yz=true, xz=true, zx=true}
+  assert(valid[dw..dp],"invalid wire/grid direction combination "..dw.."/"..dp)
+ 
+  io.write("Adding real grid...\n")
+  io.flush()
+  simion.pas:close()
+ 
+  local pa = simion.pas:open(file)
+  local r2 = r*r
+ 
+  pa:fill{
+    function(x,y,z)
+      local inside,dplane,dwire
+ 
+      if dw == "x" and dp == "y" then
+        inside = x >= xmin and x <= xmax and y >= ymin and y <= ymax
+        dplane = z-zmin
+        dwire = wire_distance(y,p)
+      elseif dw == "y" and dp == "x" then
+        inside = x >= xmin and x <= xmax and y >= ymin and y <= ymax
+        dplane = z-zmin
+        dwire = wire_distance(x,p)
+      elseif dw == "z" and dp == "y" then
+        inside = y >= ymin and y <= ymax and z >= zmin and z <= zmax
+        dplane = x-xmin
+        dwire = wire_distance(y,p)
+      elseif dw == "y" and dp == "z" then
+        inside = y >= ymin and y <= ymax and z >= zmin and z <= zmax
+        dplane = x-xmin
+        dwire = wire_distance(z,p)
+      elseif dw == "x" and dp == "z" then
+        inside = x >= xmin and x <= xmax and z >= zmin and z <= zmax
+        dplane = y-ymin
+        dwire = wire_distance(z,p)
+      else
+        inside = x >= xmin and x <= xmax and z >= zmin and z <= zmax
+        dplane = y-ymin
+        dwire = wire_distance(x,p)
+      end
+ 
+      if inside and dplane*dplane+dwire*dwire < r2 then
+        return v,true
+      end
+    end,
+    surface="fractional"
+  }
+ 
+  pa:save(file)
+  simion.pas:close()
 end
-
--- STL to PA conversion -------------------------------------------------------
-function STL2PA.convert(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm, dy_mm, dz_mm, surface, boundingbox, symmetry)
-	local surfenhance = surface or "none"  -- surface enhancement
-	local bounding = boundingbox or ""  -- grounded bounding box
-	local path,name = splitPath(stl_filename)
-	local start_time, end_time1, end_time2 = 0, 0, 0
-
-	writeHeader()
-
-	simion.pas:close()  -- remove all PAs from RAM.
-	pa = simion.pas:open()
-	pa:size((xmax-xmin)/dx_mm+1, (ymax-ymin)/dy_mm+1, (zmax-zmin)/dz_mm+1)
-	pa.dx_mm = dx_mm
-	pa.dy_mm = dy_mm
-	pa.dz_mm = dz_mm
-	pa.symmetry = symmetry or "3dplanar"
-
-	if string.match(stl_filename, "%-%%%.") then  -- check if multiple STL files have to be converted
-		-- find all STL files
-		local files = getSTLfiles(stl_filename)
-		for i,v in ipairs(files) do
-			
-			local potential = tonumber(string.match(v, "^.+%-(%d+)"))
-			local t_faces = STL2PA.readSTL(path..v)
-			local t_size = STL2PA.stlSize(t_faces)
-			io.write(i.."/"..#files.." Generating STL hash table for "..v.."... ")
-			io.flush()
-			start_time = os.clock()
-			local t_hash = map2Grid(t_faces, t_size, dx_mm, dy_mm, xmin, xmax, ymin, ymax)
-			end_time1 = os.clock()
-			io.write(" [Finished in "..string.format("%.3f", end_time1-start_time).." s]\n")
-			io.write(i.."/"..#files.." Building PA... ")
-			io.flush()
-			local xminstl = max(math.floor(t_size[1]/dx_mm)*dx_mm, xmin)
-			local xmaxstl = min(math.ceil(t_size[2]/dx_mm)*dx_mm, xmax)
-			local yminstl = max(math.floor(t_size[3]/dy_mm)*dy_mm, ymin)
-			local ymaxstl = min(math.ceil(t_size[4]/dy_mm)*dy_mm, ymax)
-			local zminstl = t_size[5]
-			local zmaxstl = t_size[6]
-			pa:fill { 
-				function(x,y,z)  -- in grid units
-					if isInsideSTL(x+xmin,y+ymin,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) then
-						return potential, true
-					else
-						if i==1 then  -- do not overwrite other electrodes
-							return 0, false
-						end
-					end
-				end,
-				surface=surfenhance
-			}
-			end_time2 = os.clock()
-			io.write(" [Finished in "..string.format("%.3f", end_time2-end_time1).." s]\n")
-		end
-	else
-		local t_faces = STL2PA.readSTL(stl_filename)
-		local t_size = STL2PA.stlSize(t_faces)
-		io.write("Generating STL hash table for "..stl_filename.."... ")
-		io.flush()
-		start_time = os.clock()
-		local t_hash = map2Grid(t_faces, t_size, dx_mm, dy_mm, xmin, xmax, ymin, ymax)
-		end_time1 = os.clock()
-		io.write(" [Finished in "..string.format("%.3f", end_time1-start_time).." s]\n")
-		io.write("Building PA...\n")
-		io.flush()
-		local xminstl = math.max(math.floor(t_size[1]/dx_mm)*dx_mm, xmin)
-		local xmaxstl = math.min(math.ceil(t_size[2]/dx_mm)*dx_mm, xmax)
-		local yminstl = math.max(math.floor(t_size[3]/dy_mm)*dy_mm, ymin)
-		local ymaxstl = math.min(math.ceil(t_size[4]/dy_mm)*dy_mm, ymax)
-		local zminstl = t_size[5]
-		local zmaxstl = t_size[6]
-		pa:fill { 
-			function(x,y,z)
-				if isInsideSTL(x+xmin,y+ymin,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) then
-					return 1, true
-				else
-					return 0, false
-				end
-			end, 
-			surface=surfenhance
-		}
-		io.write("\n")
-	end
-
-	addBoundingBox(bounding, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm, dy_mm, dz_mm)
-
-	pa:save(path..string.gsub(name, "%-%%", "")..".pa#")
-	simion.pas:close()  -- remove all PAs from RAM.
-end
-
-
--- modify (or add) one electrode of an existing PA# array ---------------------
-function STL2PA.modify(stl_filename, xmin, xmax, ymin, ymax, zmin, zmax, electrode_no, surface, boundingbox)
-	local surfenhance = surface or "none"  -- surface enhancement
-	local bounding = boundingbox or ""  -- grounded bounding box
-	local path,name = splitPath(stl_filename)
-
-	writeHeader()
-
-	simion.pas:close()  -- remove all PAs from RAM.
-	pa = simion.pas:open(path..string.gsub(name, "%-%%", "")..".pa#")  -- open pa# file
-
-	-- read new STL file
-	local files = getSTLfiles(stl_filename)
-	local t_faces = {}
-	for i,v in ipairs(files) do
-		local potential = tonumber(string.match(v, "^.+%-(%d+)"))
-		if (potential==electrode_no) then
-			t_faces = STL2PA.readSTL(path..v)
-			break
-		end
-	end
-	if next(t_faces)==nil then 
-		print("Error: no STL file with electrode_no "..electrode_no.." found.")
-		return
-	end
-	local t_size = STL2PA.stlSize(t_faces)
-
-	-- delete electrode
-	for xi,yi,zi in pa:points() do
-		if pa:potential(xi,yi,zi) == electrode_no then
-			pa:point(xi,yi,zi, 0, false)
-		end
-	end
-
-	local dx_mm = pa.dx_mm
-	local dy_mm = pa.dy_mm
-	local dz_mm = pa.dz_mm
-	io.write("Generating STL hash table for "..path..string.gsub(name, "%-%%", "-"..electrode_no)..".stl".."... ")
-	io.flush()
-	local t_hash = map2Grid(t_faces, t_size, dx_mm, dy_mm, xmin, xmax, ymin, ymax)
-	start_time = os.clock()
-	local t_hash = map2Grid(t_faces, t_size, dx_mm, dy_mm, xmin, xmax, ymin, ymax)
-	end_time1 = os.clock()
-	io.write(" [Finished in "..string.format("%.3f", end_time1-start_time).." s]\n")
-	io.write("Building PA...\n")
-	io.flush()
-	local xminstl = max(math.floor(t_size[1]/dx_mm)*dx_mm, xmin)
-	local xmaxstl = min(math.ceil(t_size[2]/dx_mm)*dx_mm, xmax)
-	local yminstl = max(math.floor(t_size[3]/dy_mm)*dy_mm, ymin)
-	local ymaxstl = min(math.ceil(t_size[4]/dy_mm)*dy_mm, ymax)
-	local zminstl = t_size[5]
-	local zmaxstl = t_size[6]
-	pa:fill { 
-		function(x,y,z)
-			if isInsideSTL(x+xmin,y+ymin,z+zmin, t_faces, xminstl, xmaxstl, yminstl, ymaxstl, zminstl, zmaxstl, t_hash, dx_mm, dy_mm) then
-				return electrode_no, true
-			end
-		end, 
-		surface=surfenhance
-	}
-	io.write("\n")
-
-	if (electrode_no==0) then
-		addBoundingBox(bounding, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm, dy_mm, dz_mm)
-	end
-
-	pa:save(path..string.gsub(name, "%-%%", "")..".pa#")
-	simion.pas:close()  -- remove all PAs from RAM.
-end
-
-
--- add or modifiy bounding box in .pa# file -----------------------------------------------------------
-function STL2PA.boundingBox(stl_filename, bounding, xmin, xmax, ymin, ymax, zmin, zmax, dx_mm, dy_mm, dz_mm)
-	local path,name = splitPath(stl_filename)
-	local file = path..string.gsub(name, "%-%%", "")..".pa#"
-
-	writeHeader()
-	io.write("Adding bounding box "..bounding.."\n")
-	io.flush()
-
-	simion.pas:close()  -- remove all PAs from RAM.
-	pa = simion.pas:open(file)  -- open pa# file
-
-	if (string.match(bounding, "%-x")) then
-		for yi=0,(ymax-ymin)/dy_mm do
-			for zi=0,(zmax-zmin)/dz_mm do
-				pa:point(0,yi,zi, 0,true)
-			end
-		end
-	else
-		for yi=0,(ymax-ymin)/dy_mm do
-			for zi=0,(zmax-zmin)/dz_mm do
-				pa:point(0,yi,zi, 0,false)
-			end
-		end
-	end
-
-	local ximax = (xmax-xmin)/dx_mm
-	if (string.match(bounding, "%+x")) then
-		for yi=0,(ymax-ymin)/dy_mm do
-			for zi=0,(zmax-zmin)/dz_mm do
-				pa:point(ximax,yi,zi, 0,true)
-			end
-		end
-	else
-		for yi=0,(ymax-ymin)/dy_mm do
-			for zi=0,(zmax-zmin)/dz_mm do
-				pa:point(ximax,yi,zi, 0,false)
-			end
-		end
-	end
-
-	if (string.match(bounding, "%-y")) then
-		for xi=0,(xmax-xmin)/dx_mm do
-			for zi=0,(zmax-zmin)/dz_mm do
-				pa:point(xi,0,zi, 0,true)
-			end
-		end
-	else
-		for xi=0,(xmax-xmin)/dx_mm do
-			for zi=0,(zmax-zmin)/dz_mm do
-				pa:point(xi,0,zi, 0,false)
-			end
-		end
-	end
-
-	local yimax = (ymax-ymin)/dy_mm
-	if (string.match(bounding, "%+y")) then
-		for xi=0,(xmax-xmin)/dx_mm do
-			for zi=0,(zmax-zmin)/dz_mm do
-				pa:point(xi,yimax,zi, 0,true)
-			end
-		end
-	else
-		for xi=0,(xmax-xmin)/dx_mm do
-			for zi=0,(zmax-zmin)/dz_mm do
-				pa:point(xi,yimax,zi, 0,false)
-			end
-		end
-	end
-
-	if (string.match(bounding, "%-z")) then
-		for xi=0,(xmax-xmin)/dx_mm do
-			for yi=0,(ymax-ymin)/dy_mm do
-				pa:point(xi,yi,0, 0,true)
-			end
-		end
-	else
-		for xi=0,(xmax-xmin)/dx_mm do
-			for yi=0,(ymax-ymin)/dy_mm do
-				pa:point(xi,yi,0, 0,false)
-			end
-		end
-	end
-
-	local zimax = (zmax-zmin)/dz_mm
-	if (string.match(bounding, "%+z")) then
-		for xi=0,(xmax-xmin)/dx_mm do
-			for yi=0,(ymax-ymin)/dy_mm do
-				pa:point(xi,yi,zimax, 0,true)
-			end
-		end
-	else
-		for xi=0,(xmax-xmin)/dx_mm do
-			for yi=0,(ymax-ymin)/dy_mm do
-				pa:point(xi,yi,zimax, 0,false)
-			end
-		end
-	end
-
-	pa:save(file)
-	simion.pas:close()  -- remove all PAs from RAM.
-end
-
-
--- remove one electrode of an existing PA# array ---------------------
-function STL2PA.removeElectrode(stl_filename, electrode_no)
-	local path,name = splitPath(stl_filename)
-
-	writeHeader()
-
-	simion.pas:close()  -- remove all PAs from RAM.
-	pa = simion.pas:open(path..string.gsub(name, "%-%%", "")..".pa#")  -- open pa# file
-
-	-- delete electrode
-	for xi,yi,zi in pa:points() do
-		if pa:potential(xi,yi,zi) == electrode_no then
-			pa:point(xi,yi,zi, 0, false)
-		end
-	end
-
-	pa:save(path..string.gsub(name, "%-%%", "")..".pa#")
-	simion.pas:close()  -- remove all PAs from RAM.
-end
-
-
+ 
 return STL2PA
