@@ -11,3 +11,5 @@ stl2palib_debug/
 stl2pa_debugstuff/
 testplanelib.lua
 tuner_debug/
+singlelib_pst.lua
+parallellib_pst.lua
